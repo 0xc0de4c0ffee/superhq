@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <!-- Chrome sweep for lit faces — specular band in the middle -->
+    <linearGradient id="lit" gradientUnits="userSpaceOnUse" x1="0" y1="240" x2="0" y2="848">
+      <stop offset="0%" stop-color="#9a9894"/>
+      <stop offset="35%" stop-color="#e0ded8"/>
+      <stop offset="50%" stop-color="#eceae4"/>
+      <stop offset="65%" stop-color="#e0ded8"/>
+      <stop offset="100%" stop-color="#706e68"/>
+    </linearGradient>
+    <!-- Dimmer chrome sweep for shadow faces -->
+    <linearGradient id="shd" gradientUnits="userSpaceOnUse" x1="0" y1="240" x2="0" y2="848">
+      <stop offset="0%" stop-color="#6a6864"/>
+      <stop offset="35%" stop-color="#a8a6a0"/>
+      <stop offset="50%" stop-color="#b8b6b0"/>
+      <stop offset="65%" stop-color="#a8a6a0"/>
+      <stop offset="100%" stop-color="#484644"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1024" height="1024" rx="228" ry="228" fill="#1e1e26"/>
+
+  <g shape-rendering="crispEdges">
+    <!-- Lit faces (left/top) -->
+    <rect x="128" y="256" width="64" height="448" fill="url(#lit)"/>
+    <rect x="320" y="384" width="128" height="64" fill="url(#lit)"/>
+    <rect x="384" y="448" width="64" height="256" fill="url(#lit)"/>
+    <rect x="640" y="384" width="256" height="64" fill="url(#lit)"/>
+    <rect x="576" y="448" width="64" height="192" fill="url(#lit)"/>
+    <rect x="832" y="448" width="64" height="384" fill="url(#lit)"/>
+
+    <!-- Shadow faces (right/bottom) -->
+    <rect x="192" y="256" width="64" height="448" fill="url(#shd)"/>
+    <rect x="256" y="448" width="64" height="64" fill="url(#shd)"/>
+    <rect x="448" y="448" width="64" height="256" fill="url(#shd)"/>
+    <rect x="640" y="448" width="64" height="192" fill="url(#shd)"/>
+    <rect x="896" y="448" width="64" height="384" fill="url(#shd)"/>
+    <rect x="640" y="640" width="192" height="64" fill="url(#shd)"/>
+  </g>
+</svg>

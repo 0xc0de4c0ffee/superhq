@@ -1,0 +1,341 @@
+pub mod card;
+pub(crate) mod dropdown;
+mod general;
+mod providers;
+mod sandbox;
+
+use gpui::*;
+use gpui::prelude::FluentBuilder as _;
+use gpui_component::input::InputState;
+use crate::ui::components::Toast;
+use std::sync::Arc;
+
+use crate::db::Database;
+use crate::ui::theme as t;
+
+/// Display info for well-known env vars.
+fn secret_display_info(env_var: &str) -> (&str, &str) {
+    match env_var {
+        "ANTHROPIC_API_KEY" => ("Anthropic", "Claude Code, Pi"),
+        "OPENAI_API_KEY" => ("OpenAI", "Codex"),
+        _ => ("Custom", "Custom secret"),
+    }
+}
+
+/// Whether an env var supports OAuth login as an alternative to API key.
+fn supports_oauth(env_var: &str) -> bool {
+    env_var == "OPENAI_API_KEY"
+}
+
+// ── Settings nav tabs ────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingsTab {
+    General,
+    Secrets,
+    Sandbox,
+}
+
+impl SettingsTab {
+    fn label(&self) -> &'static str {
+        match self {
+            Self::General => "General",
+            Self::Secrets => "Providers",
+            Self::Sandbox => "Sandbox",
+        }
+    }
+
+    fn all() -> &'static [SettingsTab] {
+        &[SettingsTab::General, SettingsTab::Secrets, SettingsTab::Sandbox]
+    }
+}
+
+// ── OAuth state ──────────────────────────────────────────────────
+
+#[derive(Clone)]
+pub(crate) enum OAuthStatus {
+    Idle,
+    InProgress,
+    Connected { email: String, plan: String },
+    Error(String),
+}
+
+// ── State for a secret row ───────────────────────────────────────
+
+pub(crate) struct SecretRow {
+    pub env_var: String,
+    pub label: String,
+    pub description: String,
+    pub input: Entity<InputState>,
+    pub has_saved_value: bool,
+    pub auth_method: String,
+}
+
+// ── Sandbox defaults (read from DB) ──────────────────────────────
+
+pub(crate) struct SandboxInputs {
+    pub cpus: Entity<InputState>,
+    pub memory_mb: Entity<InputState>,
+    pub disk_mb: Entity<InputState>,
+}
+
+// ── SettingsPanel ────────────────────────────────────────────────
+
+pub struct SettingsPanel {
+    pub(crate) db: Arc<Database>,
+    pub(crate) active_tab: SettingsTab,
+    pub(crate) default_agent_id: Option<i64>,
+    agent_dropdown: Entity<dropdown::DropdownState>,
+    pub(crate) secret_rows: Vec<SecretRow>,
+    pub(crate) sandbox_inputs: SandboxInputs,
+    pub(crate) oauth_status: OAuthStatus,
+    pub(crate) toast: Entity<Toast>,
+    pub(crate) oauth_cancel: Option<tokio::sync::oneshot::Sender<()>>,
+    on_close: Box<dyn Fn(&mut Window, &mut App) + 'static>,
+    focus_handle: FocusHandle,
+}
+
+impl SettingsPanel {
+    pub fn new(
+        db: Arc<Database>,
+        toast: Entity<Toast>,
+        on_close: impl Fn(&mut Window, &mut App) + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let agents = db.list_agents().unwrap_or_default();
+        let mut env_vars: Vec<String> = agents
+            .iter()
+            .flat_map(|a| a.required_secrets.iter().map(|e| e.env_var().to_string()))
+            .collect();
+        env_vars.sort();
+        env_vars.dedup();
+
+        let existing_secrets = db.list_secrets().unwrap_or_default();
+
+        let oauth_status = existing_secrets
+            .iter()
+            .find(|s| s.env_var == "OPENAI_API_KEY" && s.auth_method == "oauth")
+            .map(|_| OAuthStatus::Connected {
+                email: "OpenAI account".into(),
+                plan: String::new(),
+            })
+            .unwrap_or(OAuthStatus::Idle);
+
+        let secret_rows = env_vars
+            .into_iter()
+            .map(|env_var| {
+                let (lbl, desc) = secret_display_info(&env_var);
+                let label = lbl.to_string();
+                let description = desc.to_string();
+                let has_saved = db.has_secret(&env_var).unwrap_or(false);
+                let auth_method = existing_secrets
+                    .iter()
+                    .find(|s| s.env_var == env_var)
+                    .map(|s| s.auth_method.clone())
+                    .unwrap_or_else(|| "api_key".into());
+                let placeholder_label = label.clone();
+                let input = cx.new(|cx| {
+                    let mut state = InputState::new(window, cx);
+                    state.set_placeholder(
+                        format!("Enter {placeholder_label} API key"),
+                        window,
+                        cx,
+                    );
+                    state
+                });
+                SecretRow {
+                    env_var,
+                    label,
+                    description,
+                    input,
+                    has_saved_value: has_saved,
+                    auth_method,
+                }
+            })
+            .collect();
+
+        let settings = db.get_settings().ok();
+        let cpus_val = settings.as_ref().map(|s| s.sandbox_cpus).unwrap_or(2);
+        let mem_val = settings.as_ref().map(|s| s.sandbox_memory_mb).unwrap_or(8192);
+        let disk_val = settings.as_ref().map(|s| s.sandbox_disk_mb).unwrap_or(16384);
+
+        let sandbox_inputs = SandboxInputs {
+            cpus: cx.new(|cx| {
+                let mut s = InputState::new(window, cx);
+                s.set_value(&cpus_val.to_string(), window, cx);
+                s
+            }),
+            memory_mb: cx.new(|cx| {
+                let mut s = InputState::new(window, cx);
+                s.set_value(&mem_val.to_string(), window, cx);
+                s
+            }),
+            disk_mb: cx.new(|cx| {
+                let mut s = InputState::new(window, cx);
+                s.set_value(&disk_val.to_string(), window, cx);
+                s
+            }),
+        };
+
+        let all_agents = db.list_agents().unwrap_or_default();
+        let default_agent_id = settings.as_ref().and_then(|s| s.default_agent_id);
+        let agent_dropdown = Self::init_agent_dropdown(&all_agents, default_agent_id, cx);
+        let focus_handle = cx.focus_handle();
+
+        Self {
+            db,
+            active_tab: SettingsTab::General,
+            default_agent_id,
+            agent_dropdown,
+            secret_rows,
+            sandbox_inputs,
+            toast,
+            oauth_status,
+            oauth_cancel: None,
+            on_close: Box::new(on_close),
+            focus_handle,
+        }
+    }
+
+    fn close(&self, window: &mut Window, cx: &mut App) {
+        (self.on_close)(window, cx);
+    }
+
+    fn render_nav(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        let active = self.active_tab;
+
+        div()
+            .w(px(180.0))
+            .min_w(px(180.0))
+            .flex()
+            .flex_col()
+            .gap(px(2.0))
+            .py_2()
+            .px_2()
+            .border_r_1()
+            .border_color(t::border_subtle())
+            .children(SettingsTab::all().iter().map(|tab| {
+                let tab = *tab;
+                let is_active = tab == active;
+                div()
+                    .id(SharedString::from(format!("settings-tab-{:?}", tab)))
+                    .px_2p5()
+                    .py(px(6.0))
+                    .rounded(px(6.0))
+                    .cursor_pointer()
+                    .text_xs()
+                    .text_color(if is_active {
+                        t::text_secondary()
+                    } else {
+                        t::text_dim()
+                    })
+                    .when(is_active, |el| el.bg(t::bg_selected()))
+                    .hover(|s| s.bg(t::bg_hover()).text_color(t::text_tertiary()))
+                    .on_click(cx.listener(move |this, _, _window, cx| {
+                        this.active_tab = tab;
+                        cx.notify();
+                    }))
+                    .child(tab.label())
+            }))
+    }
+}
+
+impl Render for SettingsPanel {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .id("settings-backdrop")
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(rgba(0x00000088))
+            .occlude()
+            .child(
+                div()
+                    .id("settings-card")
+                    .track_focus(&self.focus_handle)
+                    .w(px(720.0))
+                    .h(px(520.0))
+                    .bg(t::bg_surface())
+                    .border_1()
+                    .border_color(t::border())
+                    .rounded(px(10.0))
+                    .shadow_lg()
+                    .flex()
+                    .flex_col()
+                    .on_mouse_down_out(cx.listener(|this, _, window, cx| {
+                        this.close(window, cx);
+                    }))
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                        if event.keystroke.key == "escape" {
+                            if this.focus_handle.is_focused(window) {
+                                this.close(window, cx);
+                            } else {
+                                this.focus_handle.focus(window);
+                            }
+                        }
+                    }))
+                    // Top bar
+                    .child(
+                        div()
+                            .px_4()
+                            .py_2p5()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .border_b_1()
+                            .border_color(t::border_subtle())
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(t::text_muted())
+                                    .child("Settings"),
+                            )
+                            .child(
+                                div()
+                                    .id("settings-close")
+                                    .px_2()
+                                    .py_1()
+                                    .rounded(px(4.0))
+                                    .cursor_pointer()
+                                    .text_xs()
+                                    .text_color(t::text_ghost())
+                                    .hover(|s| s.bg(t::bg_hover()).text_color(t::text_dim()))
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.close(window, cx);
+                                    }))
+                                    .child("Close"),
+                            ),
+                    )
+                    // Body: nav + content
+                    .child(
+                        div()
+                            .flex_grow()
+                            .flex()
+                            .overflow_hidden()
+                            .child(self.render_nav(cx))
+                            .child(
+                                div()
+                                    .flex_grow()
+                                    .p_6()
+                                    .child(match self.active_tab {
+                                        SettingsTab::General => {
+                                            self.render_general_tab(cx).into_any_element()
+                                        }
+                                        SettingsTab::Secrets => {
+                                            self.render_secrets_tab(cx).into_any_element()
+                                        }
+                                        SettingsTab::Sandbox => {
+                                            self.render_sandbox_tab(cx).into_any_element()
+                                        }
+                                    }),
+                            ),
+                    ),
+            )
+    }
+}
