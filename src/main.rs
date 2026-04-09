@@ -503,13 +503,14 @@ fn main() -> Result<()> {
                             cx.stop_propagation();
                         }
                         // cmd+shift+] → next tab, cmd+shift+[ → prev tab
-                        if m.platform && m.shift && !m.control && !m.alt {
+                        // On macOS, shift+[ = { and shift+] = }
+                        if m.platform && !m.control && !m.alt {
                             match key {
-                                "]" => {
+                                "}" | "]" if m.shift => {
                                     terminal.update(cx, |p, cx| p.next_tab(window, cx));
                                     cx.stop_propagation();
                                 }
-                                "[" => {
+                                "{" | "[" if m.shift => {
                                     terminal.update(cx, |p, cx| p.prev_tab(window, cx));
                                     cx.stop_propagation();
                                 }
@@ -517,13 +518,13 @@ fn main() -> Result<()> {
                             }
                         }
                         // ctrl+cmd+] → next workspace, ctrl+cmd+[ → prev workspace
-                        if m.platform && m.control && !m.alt && !m.shift {
+                        if m.platform && m.control && !m.alt {
                             match key {
-                                "]" => {
+                                "}" | "]" => {
                                     sidebar.update(cx, |v, cx| v.next_workspace(window, cx));
                                     cx.stop_propagation();
                                 }
-                                "[" => {
+                                "{" | "[" => {
                                     sidebar.update(cx, |v, cx| v.prev_workspace(window, cx));
                                     cx.stop_propagation();
                                 }
