@@ -502,6 +502,20 @@ fn main() -> Result<()> {
                             }
                             cx.stop_propagation();
                         }
+                        // cmd+shift+] → next tab, cmd+shift+[ → prev tab
+                        if m.platform && m.shift && !m.control && !m.alt {
+                            match key {
+                                "]" => {
+                                    terminal.update(cx, |p, cx| p.next_tab(window, cx));
+                                    cx.stop_propagation();
+                                }
+                                "[" => {
+                                    terminal.update(cx, |p, cx| p.prev_tab(window, cx));
+                                    cx.stop_propagation();
+                                }
+                                _ => {}
+                            }
+                        }
                         // ctrl+cmd+] → next workspace, ctrl+cmd+[ → prev workspace
                         if m.platform && m.control && !m.alt && !m.shift {
                             match key {
