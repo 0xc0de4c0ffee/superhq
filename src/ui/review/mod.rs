@@ -27,12 +27,19 @@ const BUILTIN_IGNORE_PATTERNS: &[&str] = &[
 
 /// Build a gitignore matcher that combines .gitignore, global gitignore,
 /// and our built-in ignore patterns.
-fn build_ignore_matcher(host_mount_path: &str) -> ignore::gitignore::Gitignore {
-    let mut builder = ignore::gitignore::GitignoreBuilder::new(host_mount_path);
+fn build_ignore_matcher(host_mount_path: Option<&str>) -> ignore::gitignore::Gitignore {
+    let root = host_mount_path.unwrap_or("/workspace");
+    let mut builder = ignore::gitignore::GitignoreBuilder::new(root);
     for pattern in BUILTIN_IGNORE_PATTERNS {
         let _ = builder.add_line(None, pattern);
+        // Also ignore files *inside* ignored directories (gitignore matched()
+        // checks individual paths, not parent traversal).
+        let trimmed = pattern.trim_end_matches('/');
+        let _ = builder.add_line(None, &format!("{}/**", trimmed));
     }
-    builder.add(format!("{}/.gitignore", host_mount_path));
+    if let Some(host) = host_mount_path {
+        builder.add(format!("{}/.gitignore", host));
+    }
     if let Ok(home) = std::env::var("HOME") {
         let global = format!("{}/.config/git/ignore", home);
         if std::path::Path::new(&global).exists() {
@@ -40,7 +47,7 @@ fn build_ignore_matcher(host_mount_path: &str) -> ignore::gitignore::Gitignore {
         }
     }
     builder.build().unwrap_or_else(|_| {
-        let mut b = ignore::gitignore::GitignoreBuilder::new(host_mount_path);
+        let mut b = ignore::gitignore::GitignoreBuilder::new(root);
         let _ = b.add_line(None, ".git");
         b.build().unwrap()
     })
@@ -168,10 +175,7 @@ impl SidePanel {
         cx: &mut Context<Self>,
     ) {
         let workspace_path = self.workspace_path.clone();
-        let host_mount_path = match self.host_mount_path.clone() {
-            Some(h) => h,
-            None => return,
-        };
+        let host_mount_path = self.host_mount_path.clone();
 
         let (tx, rx) = flume::unbounded::<DiffResult>();
 
@@ -190,8 +194,7 @@ impl SidePanel {
                     let mut cached_files: HashMap<String, changes_tab::ChangedFile> = HashMap::new();
                     let mut cached_diffs: HashMap<String, diff_engine::FileDiff> = HashMap::new();
 
-                    // Build gitignore matcher from host mount
-                    let gitignore = build_ignore_matcher(&host_mount_path);
+                    let gitignore = build_ignore_matcher(host_mount_path.as_deref());
 
                     loop {
                         let event = match watch.receiver.recv().await {
@@ -207,7 +210,9 @@ impl SidePanel {
                         let mut dirty: HashSet<String> = HashSet::new();
                         for p in &raw_paths {
                             if let Some(rel) = p.strip_prefix(&prefix) {
-                                let full = std::path::Path::new(&host_mount_path).join(rel);
+                                // For scratch sandboxes (no host), match against /workspace prefix
+                                let check_root = host_mount_path.as_deref().unwrap_or("/workspace");
+                                let full = std::path::Path::new(check_root).join(rel);
                                 if gitignore.matched(&full, false).is_ignore() {
                                     continue;
                                 }
@@ -216,10 +221,12 @@ impl SidePanel {
                         }
 
                         for path in &dirty {
-                            let (old, new) = tokio::join!(
-                                diff_engine::read_host_file(path, &host_mount_path),
-                                diff_engine::read_sandbox_file(path, "/workspace", &sandbox),
-                            );
+                            // For scratch sandboxes, host file is always None (all files are Added)
+                            let old = match host_mount_path.as_deref() {
+                                Some(host) => diff_engine::read_host_file(path, host).await,
+                                None => None,
+                            };
+                            let new = diff_engine::read_sandbox_file(path, "/workspace", &sandbox).await;
 
                             let status = match (&old, &new) {
                                 (Some(o), Some(n)) if o == n => {
