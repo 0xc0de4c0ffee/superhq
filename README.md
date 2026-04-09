@@ -49,17 +49,29 @@ For Codex with OAuth, the gateway handles token refresh and forwards authenticat
 
 ## Keyboard Shortcuts
 
+### Workspaces
+
 | Action | Shortcut |
 |--------|----------|
 | New workspace | `Cmd+N` |
 | Switch workspace 1-9 | `Cmd+1` - `Cmd+9` |
-| New agent tab | `Cmd+T` |
-| Close tab | `Cmd+W` |
-| Next tab | `Cmd+Shift+]` |
-| Previous tab | `Cmd+Shift+[` |
 | Next workspace | `Ctrl+Cmd+]` |
 | Previous workspace | `Ctrl+Cmd+[` |
+
+### Tabs
+
+| Action | Shortcut |
+|--------|----------|
+| New agent tab | `Cmd+T` |
+| Close tab | `Cmd+W` |
 | Switch tab 1-9 | `Ctrl+1` - `Ctrl+9` |
+| Next tab | `Cmd+Shift+]` |
+| Previous tab | `Cmd+Shift+[` |
+
+### App
+
+| Action | Shortcut |
+|--------|----------|
 | Settings | `Cmd+,` |
 
 Hold `Cmd` to see workspace shortcut badges. Hold `Ctrl` to see tab badges.
