@@ -16,6 +16,7 @@ use std::sync::Arc;
 const BUILTIN_IGNORE_PATTERNS: &[&str] = &[
     ".git",
     "node_modules",
+    ".pnpm-store",
     "__pycache__",
     ".venv",
     "target/",
