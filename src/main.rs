@@ -386,6 +386,8 @@ fn main() -> Result<()> {
 
     app.run(move |cx| {
         gpui_component::init(cx);
+        ui::components::actions::bind_keys(cx);
+        ui::components::text_input::bind_keys(cx);
         Theme::change(ThemeMode::Dark, None, cx);
 
         // Override gpui_component theme colors to match our dark palette

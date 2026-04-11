@@ -78,21 +78,14 @@ impl super::TerminalPanel {
         on_click: impl Fn(&mut Self, &mut Context<Self>) + 'static,
     ) -> impl IntoElement {
         let icon_color = if enabled { color.unwrap_or(t::text_dim()) } else { t::text_dim() };
-        let label_color = if enabled { t::text_secondary() } else { t::text_ghost() };
         let label = label.to_string();
         let icon = icon_path.map(|p| SharedString::from(p.to_string()));
 
-        div()
+        t::menu_item()
             .id(id.into())
-            .px_2p5()
-            .py(px(5.0))
-            .flex()
-            .items_center()
-            .gap_2()
-            .rounded(px(4.0))
-            .when(!enabled, |s| s.opacity(0.4))
-            .when(enabled && !focused, |s| s.cursor_pointer().hover(|s| s.bg(t::bg_hover())))
-            .when(enabled && focused, |s| s.bg(t::bg_hover()).cursor_pointer())
+            .hover(|s| s.bg(t::bg_hover()))
+            .when(!enabled, |s| s.opacity(0.4).cursor_default())
+            .when(focused, |s| s.bg(t::bg_hover()))
             .when(enabled, |s| {
                 s.on_click(cx.listener(move |this, _, _, cx| {
                     on_click(this, cx);
@@ -100,18 +93,14 @@ impl super::TerminalPanel {
                     cx.notify();
                 }))
             })
+            .when(!enabled, |s| s.text_color(t::text_ghost()))
             .children(icon.map(|path| {
                 svg()
                     .path(path)
                     .size(px(14.0))
                     .text_color(icon_color)
             }))
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(label_color)
-                    .child(label),
-            )
+            .child(label)
     }
 
     pub fn active_agent_tabs(&self, cx: &App) -> Vec<AgentTabInfo> {

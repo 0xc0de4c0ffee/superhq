@@ -1,7 +1,5 @@
 use gpui::*;
 use gpui::prelude::FluentBuilder as _;
-use gpui_component::input::Input;
-use gpui_component::Sizable as _;
 use crate::ui::theme as t;
 use crate::sandbox::secrets;
 use super::{SettingsPanel, OAuthStatus, supports_oauth};
@@ -30,7 +28,7 @@ impl SettingsPanel {
         cx.notify();
     }
 
-    pub(super) fn remove_secret(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn remove_secret(&mut self, index: usize, _window: &mut Window, cx: &mut Context<Self>) {
         let row = &self.secret_rows[index];
         let env_var = row.env_var.clone();
         let label = row.label.clone();
@@ -42,8 +40,8 @@ impl SettingsPanel {
         row.has_saved_value = false;
         row.auth_method = "api_key".into();
         row.input.update(cx, |state, cx| {
-            state.set_masked(false, window, cx);
-            state.set_value("", window, cx);
+            state.set_masked(false);
+            state.set_value("", cx);
         });
         if env_var == "OPENAI_API_KEY" {
             self.oauth_status = OAuthStatus::Idle;
@@ -182,21 +180,12 @@ impl SettingsPanel {
                                 .child("Waiting for browser sign-in..."),
                         )
                         .child(
-                            div()
-                                .id("oauth-cancel")
-                                .px(px(8.0))
-                                .py(px(4.0))
-                                .rounded(px(4.0))
-                                .cursor_pointer()
-                                .text_xs()
-                                .text_color(t::text_faint())
-                                .hover(|s| {
-                                    s.bg(t::bg_hover()).text_color(t::text_dim())
-                                })
+                                t::button("Cancel")
+                                .id("cancel-oauth")
+                                .hover(|s| s.bg(t::bg_hover()).text_color(t::text_tertiary()))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.cancel_oauth_login(cx);
-                                }))
-                                .child("Cancel"),
+                                })),
                         ),
                 );
             }
@@ -347,19 +336,12 @@ impl SettingsPanel {
                 )
                 .when(!is_oauth && has_saved, |el: Div| {
                     el.child(
-                        div()
-                            .id(SharedString::from(format!("remove-{i}")))
-                            .px(px(6.0))
-                            .py(px(2.0))
-                            .rounded(px(4.0))
-                            .cursor_pointer()
-                            .text_xs()
-                            .text_color(t::text_faint())
-                            .hover(|s: StyleRefinement| s.text_color(t::error_text()))
+                            t::button_danger("Remove")
+                            .id(SharedString::from(format!("remove-secret-{i}")))
+                            .hover(|s: StyleRefinement| s.bg(t::error_bg()))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.remove_secret(i, window, cx);
-                            }))
-                            .child("Remove"),
+                            })),
                     )
                 });
 
@@ -410,30 +392,15 @@ impl SettingsPanel {
                                 .border_1()
                                 .border_color(t::bg_input())
                                 .hover(|s| s.border_color(t::border_subtle()))
-                                .child(
-                                    Input::new(&row.input)
-                                        .small()
-                                        .appearance(false),
-                                ),
+                                .child(row.input.clone()),
                         )
                         .child(
-                            div()
-                                .id(SharedString::from(format!("save-{i}")))
-                                .px(px(8.0))
-                                .py(px(4.0))
-                                .rounded(px(4.0))
-                                .cursor_pointer()
-                                .text_xs()
-                                .bg(t::bg_selected())
-                                .text_color(t::text_dim())
-                                .hover(|s| {
-                                    s.bg(t::bg_hover())
-                                        .text_color(t::text_secondary())
-                                })
+                            t::button_primary("Save")
+                                .id(SharedString::from(format!("save-secret-{i}")))
+                                .hover(|s| s.bg(t::bg_hover()).text_color(t::text_primary()))
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.save_secret(i, cx);
-                                }))
-                                .child("Save"),
+                                })),
                         ),
                 );
             }

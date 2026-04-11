@@ -2,6 +2,7 @@
 name = "superhq"
 version = "0.2.3"
 edition = "2024"
+license = "AGPL-3.0-only"
 
 [dependencies]
 gpui = "0.2"
@@ -36,3 +37,4 @@ flate2 = "1"
 tar = "0.4"
 ropey = "=2.0.0-beta.1"
 ignore = "0.4.25"
+unicode-segmentation = "1.13.2"

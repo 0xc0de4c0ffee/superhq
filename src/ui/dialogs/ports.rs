@@ -1,9 +1,8 @@
 use gpui::*;
 use gpui::prelude::FluentBuilder as _;
-use gpui_component::input::{Input, InputState};
-use gpui_component::Sizable as _;
 
 use crate::db::{Database, ExposeHostPort, PortMapping};
+use crate::ui::components::TextInput;
 use crate::ui::theme as t;
 use shuru_sdk::AsyncSandbox;
 use std::sync::Arc;
@@ -27,8 +26,8 @@ pub struct PortsDialog {
     tokio_handle: tokio::runtime::Handle,
     tab: Tab,
     view: View,
-    input_a: Entity<InputState>,
-    input_b: Entity<InputState>,
+    input_a: Entity<TextInput>,
+    input_b: Entity<TextInput>,
     on_dismiss: Box<dyn Fn(&mut Window, &mut App) + 'static>,
     focus_handle: FocusHandle,
 }
@@ -43,8 +42,8 @@ impl PortsDialog {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let input_a = cx.new(|cx| InputState::new(window, cx));
-        let input_b = cx.new(|cx| InputState::new(window, cx));
+        let input_a = cx.new(|cx| TextInput::new(cx));
+        let input_b = cx.new(|cx| TextInput::new(cx));
         let focus_handle = cx.focus_handle();
         focus_handle.focus(window);
         Self {
@@ -72,25 +71,25 @@ impl PortsDialog {
             Tab::Forward => {
                 self.view = View::AddForward;
                 self.input_a.update(cx, |s, cx| {
-                    s.set_placeholder("e.g. 3000", window, cx);
-                    s.set_value("", window, cx);
-                    s.focus(window, cx);
+                    s.set_placeholder("e.g. 3000");
+                    s.set_value("", cx);
                 });
+                self.input_a.read(cx).focus(window);
                 self.input_b.update(cx, |s, cx| {
-                    s.set_placeholder("Defaults to same port", window, cx);
-                    s.set_value("", window, cx);
+                    s.set_placeholder("Defaults to same port");
+                    s.set_value("", cx);
                 });
             }
             Tab::ExposeHost => {
                 self.view = View::AddExposeHost;
                 self.input_a.update(cx, |s, cx| {
-                    s.set_placeholder("e.g. 5432", window, cx);
-                    s.set_value("", window, cx);
-                    s.focus(window, cx);
+                    s.set_placeholder("e.g. 5432");
+                    s.set_value("", cx);
                 });
+                self.input_a.read(cx).focus(window);
                 self.input_b.update(cx, |s, cx| {
-                    s.set_placeholder("Defaults to same port", window, cx);
-                    s.set_value("", window, cx);
+                    s.set_placeholder("Defaults to same port");
+                    s.set_value("", cx);
                 });
             }
         }
@@ -198,9 +197,8 @@ impl PortsDialog {
                 .cursor_pointer()
                 .text_xs()
                 .text_color(if active { t::text_secondary() } else { t::text_ghost() })
-                .when(active, |el| {
-                    el.border_b_2().border_color(t::text_secondary())
-                })
+                .border_b_2()
+                .border_color(if active { t::text_secondary() } else { t::transparent() })
                 .hover(|s| s.text_color(t::text_muted()))
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.switch_tab(tab, window, cx);
@@ -431,7 +429,7 @@ impl PortsDialog {
                             .flex_col()
                             .gap_1()
                             .child(div().text_xs().text_color(t::text_dim()).child(label_a.to_string()))
-                            .child(Input::new(&self.input_a).small()),
+                            .child(self.input_a.clone()),
                     )
                     .child(
                         div()
@@ -439,7 +437,7 @@ impl PortsDialog {
                             .flex_col()
                             .gap_1()
                             .child(div().text_xs().text_color(t::text_dim()).child(label_b.to_string()))
-                            .child(Input::new(&self.input_b).small())
+                            .child(self.input_b.clone())
                             .child(div().text_xs().text_color(t::text_faint()).child(hint.to_string())),
                     ),
             )
@@ -454,29 +452,15 @@ impl PortsDialog {
                     .justify_end()
                     .gap_2()
                     .child(
-                        div()
+                        t::button("Cancel")
                             .id("port-cancel-btn")
-                            .px_3()
-                            .py_1()
-                            .rounded(px(6.0))
-                            .cursor_pointer()
-                            .text_xs()
-                            .text_color(t::text_dim())
                             .hover(|s| s.bg(t::bg_hover()).text_color(t::text_tertiary()))
-                            .on_click(cx.listener(|this, _, window, cx| this.cancel_add(window, cx)))
-                            .child("Cancel"),
+                            .on_click(cx.listener(|this, _, window, cx| this.cancel_add(window, cx))),
                     )
                     .child({
                         let is_forward = matches!(view, View::AddForward);
-                        div()
+                        t::button_primary("Add")
                             .id("port-submit-btn")
-                            .px_3()
-                            .py_1()
-                            .rounded(px(6.0))
-                            .cursor_pointer()
-                            .text_xs()
-                            .bg(t::bg_selected())
-                            .text_color(t::text_secondary())
                             .hover(|s| s.bg(t::bg_hover()).text_color(t::text_primary()))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 if is_forward {
@@ -485,7 +469,6 @@ impl PortsDialog {
                                     this.submit_expose(window, cx);
                                 }
                             }))
-                            .child("Add")
                     }),
             )
             .into_any_element()

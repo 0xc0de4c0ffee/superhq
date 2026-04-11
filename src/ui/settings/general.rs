@@ -1,27 +1,27 @@
 use gpui::*;
 use super::SettingsPanel;
 use super::card::*;
-use super::dropdown::{DropdownEvent, DropdownItem, DropdownState};
+use crate::ui::components::select::{Select, SelectItem, SelectEvent};
 
 impl SettingsPanel {
     pub(super) fn init_agent_dropdown(
         agents: &[crate::db::Agent],
         selected: Option<i64>,
         cx: &mut Context<Self>,
-    ) -> Entity<DropdownState> {
-        let items: Vec<DropdownItem> = agents
+    ) -> Entity<Select> {
+        let items: Vec<SelectItem> = agents
             .iter()
-            .map(|a| DropdownItem {
+            .map(|a| SelectItem {
                 id: a.id,
                 label: a.display_name.clone(),
                 icon: a.icon.clone(),
             })
             .collect();
 
-        let state = cx.new(|cx| DropdownState::new(items, selected, cx));
+        let state = cx.new(|cx| Select::new(items, selected, cx));
 
-        cx.subscribe(&state, |this: &mut Self, _, event: &DropdownEvent, cx| {
-            let DropdownEvent::Change(value) = event;
+        cx.subscribe(&state, |this: &mut Self, _, event: &SelectEvent, cx| {
+            let SelectEvent::Change(value) = event;
             this.default_agent_id = *value;
             if let Err(e) = this.db.update_default_agent(*value) {
                 eprintln!("Failed to save default agent: {e}");

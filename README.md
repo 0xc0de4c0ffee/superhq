@@ -105,4 +105,4 @@ cargo build --release
 
 ## License
 
-[Universal Permissive License v1.0](LICENSE)
+[GNU Affero General Public License v3.0](LICENSE)

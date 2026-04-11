@@ -214,20 +214,10 @@ impl Render for TerminalPanel {
                     let total_items = shell_count + agents.len();
                     let focused_idx = self.agent_menu_index.min(total_items.saturating_sub(1));
 
-                    let mut menu = div()
+                    let mut menu = t::popover()
                         .id("agent-menu-popup")
                         .track_focus(&self.agent_menu_focus)
                         .w(px(200.0))
-                        .bg(t::bg_surface())
-                        .border_1()
-                        .border_color(t::border())
-                        .rounded(px(8.0))
-                        .shadow_lg()
-                        .flex()
-                        .flex_col()
-                        .py_1()
-                        .px_1()
-                        .occlude()
                         .on_mouse_down(MouseButton::Left, |_, _, cx| {
                             cx.stop_propagation();
                         })
@@ -445,49 +435,29 @@ impl Render for TerminalPanel {
                             .child(div().flex_grow())
                             // Cancel
                             .child(
-                                div()
+                                t::button("Cancel")
                                     .id("close-cancel")
-                                    .px_2()
-                                    .py(px(3.0))
-                                    .rounded(px(4.0))
-                                    .cursor_pointer()
-                                    .text_color(t::text_dim())
-                                    .hover(|s| s.bg(t::bg_hover()))
+                                    .hover(|s| s.bg(t::bg_hover()).text_color(t::text_tertiary()))
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.pending_close = None;
                                         cx.notify();
-                                    }))
-                                    .child("Cancel"),
+                                    })),
                             )
-                            // Checkpoint & Close
                             .child(
-                                div()
+                                t::button_primary("Checkpoint")
                                     .id("close-checkpoint")
-                                    .px_2()
-                                    .py(px(3.0))
-                                    .rounded(px(4.0))
-                                    .cursor_pointer()
-                                    .text_color(t::text_secondary())
-                                    .hover(|s| s.bg(t::bg_hover()))
+                                    .hover(|s| s.bg(t::bg_hover()).text_color(t::text_primary()))
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         this.checkpoint_tab(close_ws_id, close_tab_id, cx);
-                                    }))
-                                    .child("Checkpoint"),
+                                    })),
                             )
-                            // Close (destructive)
                             .child(
-                                div()
+                                t::button_danger("Close")
                                     .id("close-confirm")
-                                    .px_2()
-                                    .py(px(3.0))
-                                    .rounded(px(4.0))
-                                    .cursor_pointer()
-                                    .text_color(gpui::rgba(0xFF6B6BFF))
-                                    .hover(|s| s.bg(gpui::rgba(0xFF6B6B15)))
+                                    .hover(|s| s.bg(t::error_bg()))
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         this.force_close_tab(close_ws_id, close_tab_id, cx);
-                                    }))
-                                    .child("Close"),
+                                    })),
                             ),
                     );
                 }
@@ -536,18 +506,12 @@ impl Render for TerminalPanel {
                                     .child("Open Settings"),
                             )
                             .child(
-                                div()
+                                t::button("Skip")
                                     .id("secrets-skip")
-                                    .px_2()
-                                    .py(px(3.0))
-                                    .rounded(px(4.0))
-                                    .cursor_pointer()
-                                    .text_color(t::text_dim())
-                                    .hover(|s| s.bg(t::bg_hover()))
+                                    .hover(|s| s.bg(t::bg_hover()).text_color(t::text_tertiary()))
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.dismiss_missing_secrets(cx);
-                                    }))
-                                    .child("Skip"),
+                                    })),
                             ),
                     );
                   }
@@ -603,32 +567,20 @@ impl Render for TerminalPanel {
                                 )
                                 .child(div().flex_grow())
                                 .child(
-                                    div()
+                                    t::button_primary("Fork & Continue")
                                         .id("fork-tab")
-                                        .px_2()
-                                        .py(px(3.0))
-                                        .rounded(px(4.0))
-                                        .cursor_pointer()
-                                        .text_color(t::text_secondary())
-                                        .hover(|s| s.bg(t::bg_hover()))
+                                        .hover(|s| s.bg(t::bg_hover()).text_color(t::text_primary()))
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             this.fork_tab(fork_ws, fork_tab, cx);
-                                        }))
-                                        .child("Fork & Continue"),
+                                        })),
                                 )
                                 .child(
-                                    div()
+                                    t::button("Remove")
                                         .id("remove-tab")
-                                        .px_2()
-                                        .py(px(3.0))
-                                        .rounded(px(4.0))
-                                        .cursor_pointer()
-                                        .text_color(t::text_dim())
-                                        .hover(|s| s.bg(t::bg_hover()))
+                                        .hover(|s| s.bg(t::bg_hover()).text_color(t::text_tertiary()))
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             this.remove_stopped_tab(remove_ws, remove_tab, cx);
-                                        }))
-                                        .child("Remove"),
+                                        })),
                                 ),
                         )
                         .child(

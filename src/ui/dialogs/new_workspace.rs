@@ -1,16 +1,19 @@
 use gpui::*;
-use gpui::prelude::FluentBuilder as _;
-use gpui_component::input::{Input, InputState};
-use gpui_component::{Sizable as _};
+use crate::ui::components::actions::{Cancel, Confirm};
+use crate::ui::components::button::{Button, ButtonVariant};
+use crate::ui::components::path_picker::{PathPicker, PathPickerEvent, PathPickerMode};
 
 use crate::db::{CreateWorkspaceParams, Database};
+use crate::ui::components::TextInput;
 use crate::ui::theme as t;
 use std::sync::Arc;
 
 pub struct NewWorkspaceDialog {
     db: Arc<Database>,
-    name_input: Entity<InputState>,
-    mount_path: Option<String>,
+    name_input: Entity<TextInput>,
+    path_picker: Entity<PathPicker>,
+    cancel_btn: Entity<Button>,
+    create_btn: Entity<Button>,
     on_created: Box<dyn Fn(&mut Window, &mut App) + 'static>,
     on_dismiss: Box<dyn Fn(&mut Window, &mut App) + 'static>,
     focus_handle: FocusHandle,
@@ -25,46 +28,50 @@ impl NewWorkspaceDialog {
         cx: &mut Context<Self>,
     ) -> Self {
         let name_input = cx.new(|cx| {
-            let mut state = InputState::new(window, cx);
-            state.set_placeholder("Workspace name", window, cx);
-            state.focus(window, cx);
-            state
+            let mut input = TextInput::new(cx);
+            input.set_placeholder("Workspace name");
+            input
         });
+        name_input.read(cx).focus(window);
+
+        let path_picker = cx.new(|cx| PathPicker::new(PathPickerMode::Directory, cx));
+        cx.subscribe(&path_picker, |_this, _, _event: &PathPickerEvent, cx| {
+            cx.notify();
+        }).detach();
+
+        let this_weak = cx.entity().downgrade();
+        let this_weak2 = this_weak.clone();
+
+        let cancel_btn = cx.new(|cx| {
+            Button::new("Cancel", cx)
+                .on_click(move |window, cx| {
+                    let _ = this_weak.update(cx, |this, cx| {
+                        (this.on_dismiss)(window, cx);
+                    });
+                })
+        });
+        let create_btn = cx.new(|cx| {
+            Button::new("Create", cx)
+                .variant(ButtonVariant::Primary)
+                .on_click(move |window, cx| {
+                    let _ = this_weak2.update(cx, |this, cx| {
+                        this.submit(window, cx);
+                    });
+                })
+        });
+
         let focus_handle = cx.focus_handle();
         focus_handle.focus(window);
         Self {
             db,
             name_input,
-            mount_path: None,
+            path_picker,
+            cancel_btn,
+            create_btn,
             on_created: Box::new(on_created),
             on_dismiss: Box::new(on_dismiss),
             focus_handle,
         }
-    }
-
-    fn browse_folder(&mut self, cx: &mut Context<Self>) {
-        let receiver = cx.prompt_for_paths(PathPromptOptions {
-            files: false,
-            directories: true,
-            multiple: false,
-            prompt: Some("Select folder to mount".into()),
-        });
-        cx.spawn(async move |this, cx| {
-            if let Ok(Ok(Some(paths))) = receiver.await {
-                if let Some(path) = paths.first() {
-                    let path_str = path.to_string_lossy().to_string();
-                    cx.update(|cx| {
-                        this.update(cx, |this, cx| {
-                            this.mount_path = Some(path_str);
-                            cx.notify();
-                        })
-                        .ok();
-                    })
-                    .ok();
-                }
-            }
-        })
-        .detach();
     }
 
     fn submit(&self, window: &mut Window, cx: &mut App) {
@@ -73,7 +80,7 @@ impl NewWorkspaceDialog {
             return;
         }
 
-        let mount_path = self.mount_path.clone();
+        let mount_path = self.path_picker.read(cx).value().map(|s| s.to_string());
         let is_git_repo = mount_path
             .as_ref()
             .map_or(false, |p| std::path::Path::new(p).join(".git").exists());
@@ -105,14 +112,6 @@ impl NewWorkspaceDialog {
 
 impl Render for NewWorkspaceDialog {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let mount_display = self
-            .mount_path
-            .as_ref()
-            .map(|p| p.split('/').last().unwrap_or(p).to_string())
-            .unwrap_or_else(|| "None (scratch sandbox)".to_string());
-        let has_mount = self.mount_path.is_some();
-
-        // Full-screen backdrop
         div()
             .id("dialog-backdrop")
             .absolute()
@@ -130,13 +129,15 @@ impl Render for NewWorkspaceDialog {
             .child(
                 div()
                     .id("dialog-card")
+                    .key_context("Dialog")
                     .track_focus(&self.focus_handle)
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                        if event.keystroke.key == "escape" {
-                            this.dismiss(window, cx);
-                        }
+                    .on_action(cx.listener(|this, _: &Cancel, window, cx| {
+                        this.dismiss(window, cx);
                     }))
-                    .w(px(360.0))
+                    .on_action(cx.listener(|this, _: &Confirm, window, cx| {
+                        this.submit(window, cx);
+                    }))
+                    .w(px(380.0))
                     .bg(t::bg_surface())
                     .border_1()
                     .border_color(t::border())
@@ -180,10 +181,11 @@ impl Render for NewWorkspaceDialog {
                                     .child(
                                         div()
                                             .text_xs()
+                                            .font_weight(FontWeight::MEDIUM)
                                             .text_color(t::text_dim())
                                             .child("Name"),
                                     )
-                                    .child(Input::new(&self.name_input).small()),
+                                    .child(self.name_input.clone()),
                             )
                             // Mount folder field
                             .child(
@@ -194,57 +196,16 @@ impl Render for NewWorkspaceDialog {
                                     .child(
                                         div()
                                             .text_xs()
+                                            .font_weight(FontWeight::MEDIUM)
                                             .text_color(t::text_dim())
                                             .child("Mount folder"),
                                     )
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .gap_2()
-                                            .child(
-                                                div()
-                                                    .flex_grow()
-                                                    .text_xs()
-                                                    .text_color(if has_mount {
-                                                        t::text_secondary()
-                                                    } else {
-                                                        t::text_ghost()
-                                                    })
-                                                    .child(mount_display),
-                                            )
-                                            .child(
-                                                div()
-                                                    .id("browse-btn")
-                                                    .text_xs()
-                                                    .text_color(t::text_dim())
-                                                    .cursor_pointer()
-                                                    .hover(|s| s.text_color(t::text_tertiary()))
-                                                    .on_click(cx.listener(|this, _, _window, cx| {
-                                                        this.browse_folder(cx);
-                                                    }))
-                                                    .child("Browse"),
-                                            )
-                                            .when(has_mount, |el| {
-                                                el.child(
-                                                    div()
-                                                        .id("clear-mount")
-                                                        .text_xs()
-                                                        .text_color(t::text_ghost())
-                                                        .cursor_pointer()
-                                                        .hover(|s| s.text_color(t::text_dim()))
-                                                        .on_click(cx.listener(|this, _, _window, cx| {
-                                                            this.mount_path = None;
-                                                            cx.notify();
-                                                        }))
-                                                        .child("Clear"),
-                                                )
-                                            }),
-                                    )
+                                    .child(self.path_picker.clone())
                                     .child(
                                         div()
                                             .text_xs()
                                             .text_color(t::text_faint())
+                                            .pt(px(2.0))
                                             .child("Leave empty for a scratch sandbox"),
                                     ),
                             ),
@@ -259,39 +220,9 @@ impl Render for NewWorkspaceDialog {
                             .flex()
                             .justify_end()
                             .gap_2()
-                            .child(
-                                div()
-                                    .id("cancel-btn")
-                                    .px_3()
-                                    .py_1()
-                                    .rounded(px(6.0))
-                                    .cursor_pointer()
-                                    .text_xs()
-                                    .text_color(t::text_dim())
-                                    .hover(|s| s.bg(t::bg_hover()).text_color(t::text_tertiary()))
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.dismiss(window, cx);
-                                    }))
-                                    .child("Cancel"),
-                            )
-                            .child(
-                                div()
-                                    .id("create-btn")
-                                    .px_3()
-                                    .py_1()
-                                    .rounded(px(6.0))
-                                    .cursor_pointer()
-                                    .text_xs()
-                                    .bg(t::bg_selected())
-                                    .text_color(t::text_secondary())
-                                    .hover(|s| s.bg(t::bg_hover()).text_color(t::text_primary()))
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.submit(window, cx);
-                                    }))
-                                    .child("Create"),
-                            ),
+                            .child(self.cancel_btn.clone())
+                            .child(self.create_btn.clone()),
                     ),
             )
     }
 }
-

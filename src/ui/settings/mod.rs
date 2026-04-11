@@ -1,5 +1,4 @@
 pub mod card;
-pub(crate) mod dropdown;
 mod general;
 mod providers;
 mod sandbox;
@@ -7,7 +6,7 @@ mod shortcuts;
 
 use gpui::*;
 use gpui::prelude::FluentBuilder as _;
-use gpui_component::input::InputState;
+use crate::ui::components::TextInput;
 use crate::ui::components::Toast;
 use std::sync::Arc;
 
@@ -69,7 +68,7 @@ pub(crate) struct SecretRow {
     pub env_var: String,
     pub label: String,
     pub description: String,
-    pub input: Entity<InputState>,
+    pub input: Entity<TextInput>,
     pub has_saved_value: bool,
     pub auth_method: String,
 }
@@ -77,9 +76,9 @@ pub(crate) struct SecretRow {
 // ── Sandbox defaults (read from DB) ──────────────────────────────
 
 pub(crate) struct SandboxInputs {
-    pub cpus: Entity<InputState>,
-    pub memory_mb: Entity<InputState>,
-    pub disk_mb: Entity<InputState>,
+    pub cpus: Entity<TextInput>,
+    pub memory_mb: Entity<TextInput>,
+    pub disk_mb: Entity<TextInput>,
 }
 
 // ── SettingsPanel ────────────────────────────────────────────────
@@ -88,7 +87,7 @@ pub struct SettingsPanel {
     pub(crate) db: Arc<Database>,
     pub(crate) active_tab: SettingsTab,
     pub(crate) default_agent_id: Option<i64>,
-    agent_dropdown: Entity<dropdown::DropdownState>,
+    agent_dropdown: Entity<crate::ui::components::Select>,
     pub(crate) secret_rows: Vec<SecretRow>,
     pub(crate) sandbox_inputs: SandboxInputs,
     pub(crate) oauth_status: OAuthStatus,
@@ -103,7 +102,7 @@ impl SettingsPanel {
         db: Arc<Database>,
         toast: Entity<Toast>,
         on_close: impl Fn(&mut Window, &mut App) + 'static,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let agents = db.list_agents().unwrap_or_default();
@@ -139,13 +138,10 @@ impl SettingsPanel {
                     .unwrap_or_else(|| "api_key".into());
                 let placeholder_label = label.clone();
                 let input = cx.new(|cx| {
-                    let mut state = InputState::new(window, cx);
-                    state.set_placeholder(
-                        format!("Enter {placeholder_label} API key"),
-                        window,
-                        cx,
-                    );
-                    state
+                    let mut input = TextInput::new(cx);
+                    input.set_placeholder(format!("Enter {placeholder_label} API key"));
+                    input.set_masked(true);
+                    input
                 });
                 SecretRow {
                     env_var,
@@ -165,18 +161,18 @@ impl SettingsPanel {
 
         let sandbox_inputs = SandboxInputs {
             cpus: cx.new(|cx| {
-                let mut s = InputState::new(window, cx);
-                s.set_value(&cpus_val.to_string(), window, cx);
+                let mut s = TextInput::new(cx);
+                s.set_value(cpus_val.to_string(), cx);
                 s
             }),
             memory_mb: cx.new(|cx| {
-                let mut s = InputState::new(window, cx);
-                s.set_value(&mem_val.to_string(), window, cx);
+                let mut s = TextInput::new(cx);
+                s.set_value(mem_val.to_string(), cx);
                 s
             }),
             disk_mb: cx.new(|cx| {
-                let mut s = InputState::new(window, cx);
-                s.set_value(&disk_val.to_string(), window, cx);
+                let mut s = TextInput::new(cx);
+                s.set_value(disk_val.to_string(), cx);
                 s
             }),
         };

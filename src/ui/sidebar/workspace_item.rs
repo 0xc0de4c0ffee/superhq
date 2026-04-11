@@ -161,18 +161,8 @@ impl Render for WorkspaceItemView {
                     .anchor(Corner::TopLeft)
                     .snap_to_window()
                     .child(
-                        div()
+                        t::popover()
                             .w(px(160.0))
-                            .bg(t::bg_surface())
-                            .border_1()
-                            .border_color(t::border())
-                            .rounded(px(8.0))
-                            .shadow_lg()
-                            .py_1()
-                            .px_1()
-                            .flex()
-                            .flex_col()
-                            .occlude()
                             .on_mouse_down(MouseButton::Left, |_, _, cx| {
                                 cx.stop_propagation();
                             })
@@ -181,22 +171,13 @@ impl Render for WorkspaceItemView {
                             })
                             // Duplicate
                             .child(
-                                div()
+                                    t::menu_item()
                                     .id("menu-duplicate")
-                                    .px_2p5()
-                                    .py(px(5.0))
-                                    .rounded(px(4.0))
-                                    .cursor_pointer()
-                                    .text_xs()
-                                    .text_color(t::text_secondary())
                                     .hover(|s| s.bg(t::bg_hover()))
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.close_menu(cx);
                                         this.do_duplicate(cx);
                                     }))
-                                    .flex()
-                                    .items_center()
-                                    .gap_1p5()
                                     .child(
                                         svg()
                                             .path(SharedString::from("icons/copy.svg"))
@@ -205,7 +186,7 @@ impl Render for WorkspaceItemView {
                                     )
                                     .child("Duplicate"),
                             )
-                            .child(div().h(px(1.0)).mx_1p5().my_0p5().bg(t::border_subtle()))
+                            .child(t::menu_separator())
                             // Hold-to-delete
                             .children(self.hold_button.as_ref().map(|btn| btn.clone())),
                     ),
