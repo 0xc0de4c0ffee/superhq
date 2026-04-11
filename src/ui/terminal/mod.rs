@@ -179,7 +179,7 @@ pub struct TerminalPanel {
     /// Callback to open settings panel (avoids action dispatch issues).
     on_open_settings: Option<Box<dyn Fn(&mut Window, &mut App) + 'static>>,
     /// Callback to open the ports dialog. Receives workspace_id.
-    on_open_port_dialog: Option<Box<dyn Fn(i64, &mut Window, &mut App) + 'static>>,
+    on_open_port_dialog: Option<Box<dyn Fn(i64, Option<Arc<AsyncSandbox>>, tokio::runtime::Handle, &mut Window, &mut App) + 'static>>,
     /// Reference to the right sidebar for sandbox-ready notifications.
     side_panel: Option<Entity<SidePanel>>,
     /// Whether to show tab index badges (when Ctrl is held).
@@ -282,7 +282,7 @@ impl TerminalPanel {
         self.on_open_settings = Some(Box::new(cb));
     }
 
-    pub fn set_on_open_port_dialog(&mut self, cb: impl Fn(i64, &mut Window, &mut App) + 'static) {
+    pub fn set_on_open_port_dialog(&mut self, cb: impl Fn(i64, Option<Arc<AsyncSandbox>>, tokio::runtime::Handle, &mut Window, &mut App) + 'static) {
         self.on_open_port_dialog = Some(Box::new(cb));
     }
 
@@ -1046,18 +1046,35 @@ impl TerminalPanel {
                 config.from = Some(checkpoint.clone());
             }
 
-            let sandbox = tokio_handle
-                .spawn(async move { AsyncSandbox::boot(config).await })
-                .await
-                .unwrap();
+            // Retry boot up to 3 times with 500ms delay to handle port bind
+            // races when forking (old sandbox's port listeners may still be closing).
+            let mut last_err = String::new();
+            let sandbox = {
+                let mut booted = None;
+                for attempt in 0..3u32 {
+                    if attempt > 0 {
+                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    }
+                    let cfg = config.clone();
+                    match tokio_handle
+                        .spawn(async move { AsyncSandbox::boot(cfg).await })
+                        .await
+                        .unwrap()
+                    {
+                        Ok(s) => { booted = Some(Arc::new(s)); break; }
+                        Err(e) => { last_err = format!("{e}"); }
+                    }
+                }
+                booted
+            };
 
             let sandbox = match sandbox {
-                Ok(s) => Arc::new(s),
-                Err(e) => {
+                Some(s) => s,
+                None => {
                     let step_idx = start_ws_step;
                     cx.update(|cx| {
                         this.update(cx, |p, cx| {
-                            p.fail_setup(ws_id, tab_id, step_idx, format!("{e}"), None);
+                            p.fail_setup(ws_id, tab_id, step_idx, last_err, None);
                             cx.notify();
                         }).ok();
                     }).ok();
@@ -1395,8 +1412,17 @@ impl TerminalPanel {
             if session.tabs.is_empty() {
                 session.active_tab = 0;
             } else {
-                // Focus the last tab
                 session.active_tab = session.tabs.len() - 1;
+            }
+
+            // Deactivate review panel if no sandbox is running
+            let has_sandbox = session.tabs.iter().any(|t| {
+                matches!(&t.kind, TabKind::Agent { sandbox: Some(_), .. })
+            });
+            if !has_sandbox {
+                if let Some(ref side_panel) = self.side_panel {
+                    side_panel.update(cx, |sp, cx| sp.deactivate(cx));
+                }
             }
 
             cx.notify();
@@ -2668,7 +2694,10 @@ impl Render for TerminalPanel {
                                 .hover(|s| s.bg(t::bg_hover()).text_color(t::text_muted()))
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     if let Some(ref cb) = this.on_open_port_dialog {
-                                        cb(ws_id, window, cx);
+                                        let (sb, th) = this.get_active_sandbox(ws_id)
+                                            .map(|(sb, th)| (Some(sb), th))
+                                            .unwrap_or_else(|| (None, this.tokio_handle.clone()));
+                                        cb(ws_id, sb, th, window, cx);
                                     }
                                 })),
                             ),

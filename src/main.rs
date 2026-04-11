@@ -9,6 +9,7 @@ mod ui;
 use anyhow::Result;
 use db::Database;
 use gpui::*;
+use shuru_sdk::AsyncSandbox;
 use gpui::prelude::FluentBuilder as _;
 use gpui_component::resizable::{h_resizable, resizable_panel};
 use gpui_component::{Root, Theme, ThemeMode};
@@ -66,9 +67,9 @@ impl AppView {
                     this.open_settings(window, cx);
                 });
             });
-            panel.set_on_open_port_dialog(move |ws_id, window, cx| {
+            panel.set_on_open_port_dialog(move |ws_id, sandbox, tokio_handle, window, cx| {
                 let _ = this_for_ports.update(cx, |this: &mut Self, cx| {
-                    this.open_ports_dialog(ws_id, window, cx);
+                    this.open_ports_dialog(ws_id, sandbox, tokio_handle, window, cx);
                 });
             });
             panel
@@ -174,7 +175,7 @@ impl AppView {
         cx.notify();
     }
 
-    fn open_ports_dialog(&mut self, ws_id: i64, window: &mut Window, cx: &mut Context<Self>) {
+    fn open_ports_dialog(&mut self, ws_id: i64, sandbox: Option<Arc<AsyncSandbox>>, tokio_handle: tokio::runtime::Handle, window: &mut Window, cx: &mut Context<Self>) {
         let db = self.db.clone();
         let this = cx.entity().downgrade();
 
@@ -182,6 +183,8 @@ impl AppView {
             PortsDialog::new(
                 db,
                 ws_id,
+                sandbox,
+                tokio_handle,
                 move |_window, cx| {
                     this.update(cx, |app, cx| {
                         app.ports_dialog = None;
