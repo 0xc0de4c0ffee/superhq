@@ -1,5 +1,4 @@
 use super::changes_tab::{ChangedFile, FileStatus};
-use super::diff_engine::{self, DiffStats, FileDiff};
 use shuru_sdk::AsyncSandbox;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -43,15 +42,13 @@ fn build_ignore_matcher(host_mount_path: Option<&str>) -> ignore::gitignore::Git
 
 pub struct DiffResult {
     pub dirty_paths: HashSet<String>,
-    /// Files that were updated or newly added in this batch.
     pub updated_files: HashMap<String, ChangedFile>,
-    pub updated_diffs: HashMap<String, FileDiff>,
-    /// Paths whose diff was removed (file reverted to original).
     pub removed_paths: HashSet<String>,
 }
 
-/// Spawns a bridge thread that watches sandbox FS events, computes diffs,
-/// and sends results over a flume channel.
+/// Spawns a bridge thread that watches sandbox FS events, determines file
+/// status (Added/Modified/Deleted), and sends results over a flume channel.
+/// Does NOT read file contents or compute diffs — those are done lazily on expand.
 pub struct WatchBridge {
     _handle: std::thread::JoinHandle<()>,
 }
@@ -76,107 +73,94 @@ impl WatchBridge {
 
                     let prefix = format!("{}/", workspace_path);
                     let mut cached_files: HashMap<String, ChangedFile> = HashMap::new();
-                    let mut cached_diffs: HashMap<String, FileDiff> = HashMap::new();
-                    // Track last-seen sandbox content to skip no-op updates
-                    // (scratch sandboxes have no host file, so watcher events
-                    // would otherwise re-send the same diff every time).
-                    let mut last_content: HashMap<String, Vec<u8>> = HashMap::new();
 
                     let gitignore = build_ignore_matcher(host_mount_path.as_deref());
 
+                    let ignore_root = std::path::Path::new(
+                        host_mount_path.as_deref().unwrap_or("/workspace"),
+                    );
+
                     loop {
+                        // Block until first event
                         let event = match watch.receiver.recv().await {
                             Some(e) => e,
                             None => break,
                         };
 
-                        let mut raw_paths = vec![event.path];
-                        while let Ok(ev) = watch.receiver.try_recv() {
-                            raw_paths.push(ev.path);
+                        let mut raw_paths: Vec<(String, u8)> = vec![(event.path, event.kind)];
+
+                        // Settle: drain until 50ms with no new events
+                        loop {
+                            while let Ok(ev) = watch.receiver.try_recv() {
+                                raw_paths.push((ev.path, ev.kind));
+                            }
+                            match tokio::time::timeout(
+                                std::time::Duration::from_millis(50),
+                                watch.receiver.recv(),
+                            ).await {
+                                Ok(Some(ev)) => raw_paths.push((ev.path, ev.kind)),
+                                Ok(None) => return,
+                                Err(_) => break,
+                            }
                         }
 
-                        let mut dirty: HashSet<String> = HashSet::new();
-                        let ignore_root = std::path::Path::new(
-                            host_mount_path.as_deref().unwrap_or("/workspace"),
-                        );
-                        for p in &raw_paths {
-                            if let Some(rel) = p.strip_prefix(&prefix) {
+                        let mut dirty: HashMap<String, u8> = HashMap::new();
+                        for (path, kind) in &raw_paths {
+                            if let Some(rel) = path.strip_prefix(&prefix) {
                                 let full = ignore_root.join(rel);
-                                if gitignore.matched_path_or_any_parents(&full, false).is_ignore() {
-                                    continue;
+                                if !gitignore.matched_path_or_any_parents(&full, false).is_ignore() {
+                                    dirty.insert(rel.to_string(), *kind);
                                 }
-                                dirty.insert(rel.to_string());
                             }
+                        }
+
+                        if dirty.is_empty() {
+                            continue;
                         }
 
                         let mut updated_files = HashMap::new();
-                        let mut updated_diffs = HashMap::new();
                         let mut removed_paths = HashSet::new();
 
-                        for path in &dirty {
-                            let old = match host_mount_path.as_deref() {
-                                Some(host) => diff_engine::read_host_file(path, host).await,
-                                None => None,
+                        for (rel, kind) in &dirty {
+                            let host_exists = match host_mount_path.as_deref() {
+                                Some(host) => {
+                                    let full = format!("{}/{}", host, rel);
+                                    tokio::fs::metadata(&full).await.is_ok()
+                                }
+                                None => false,
                             };
-                            let new = diff_engine::read_sandbox_file(path, "/workspace", &sandbox).await;
 
-                            // Skip if sandbox content unchanged since last report
-                            if let Some(new_bytes) = &new {
-                                if last_content.get(path).map_or(false, |prev| prev == new_bytes) {
-                                    continue;
-                                }
-                            }
-
-                            let status = match (&old, &new) {
-                                (Some(o), Some(n)) if o == n => {
-                                    cached_files.remove(path);
-                                    cached_diffs.remove(path);
-                                    last_content.remove(path);
-                                    removed_paths.insert(path.clone());
-                                    continue;
-                                }
-                                (Some(_), Some(_)) => FileStatus::Modified,
-                                (None, Some(_)) => FileStatus::Added,
-                                (Some(_), None) => {
-                                    last_content.remove(path);
+                            let status = if *kind == shuru_proto::watch_kind::DELETE {
+                                if host_exists {
                                     FileStatus::Deleted
-                                }
-                                (None, None) => {
-                                    cached_files.remove(path);
-                                    cached_diffs.remove(path);
-                                    last_content.remove(path);
-                                    removed_paths.insert(path.clone());
+                                } else {
+                                    // File deleted in sandbox, never existed on host — remove
+                                    cached_files.remove(rel);
+                                    removed_paths.insert(rel.clone());
                                     continue;
                                 }
+                            } else if host_exists {
+                                FileStatus::Modified
+                            } else {
+                                FileStatus::Added
                             };
 
-                            let old_bytes = old.unwrap_or_default();
-                            let new_bytes = new.unwrap_or_default();
-                            last_content.insert(path.clone(), new_bytes.clone());
-                            let diff = diff_engine::compute_file_diff(&old_bytes, &new_bytes);
-
-                            let file = ChangedFile {
-                                path: path.clone(),
-                                status,
-                                diff_stats: Some(DiffStats {
-                                    additions: diff.additions,
-                                    deletions: diff.deletions,
-                                }),
-                            };
-                            cached_files.insert(path.clone(), file.clone());
-                            cached_diffs.insert(path.clone(), diff.clone());
-                            updated_files.insert(path.clone(), file);
-                            updated_diffs.insert(path.clone(), diff);
+                            if cached_files.get(rel).map_or(true, |e| e.status != status) {
+                                let file = ChangedFile { path: rel.clone(), status };
+                                cached_files.insert(rel.clone(), file.clone());
+                                updated_files.insert(rel.clone(), file);
+                            }
                         }
 
-                        let result = DiffResult {
-                            dirty_paths: dirty,
-                            updated_files,
-                            updated_diffs,
-                            removed_paths,
-                        };
-                        if tx.send(result).is_err() {
-                            break;
+                        if !updated_files.is_empty() || !removed_paths.is_empty() {
+                            let result = DiffResult {
+                                dirty_paths: dirty.into_keys().collect(),
+                                updated_files,
+                                removed_paths,
+                            };
+                            if tx.send(result).is_err() {
+                                break;
+                            }
                         }
                     }
                 });

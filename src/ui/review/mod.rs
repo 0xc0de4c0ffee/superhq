@@ -1,11 +1,13 @@
 mod changes_tab;
 pub mod diff_engine;
+mod diff_service;
 mod diff_view;
 mod watcher;
 
 pub use changes_tab::ChangesTab;
 
 use changes_tab::ChangesSnapshot;
+use diff_service::DiffService;
 use watcher::{DiffResult, WatchBridge};
 
 use crate::ui::theme as t;
@@ -65,6 +67,12 @@ impl SidePanel {
         self.tokio_handle = Some(tokio_handle.clone());
         self.visible = true;
 
+        self.changes_tab.service = Some(DiffService::new(
+            sandbox.clone(),
+            self.host_mount_path.clone(),
+            tokio_handle.clone(),
+        ));
+
         self.start_watching(cx);
         cx.notify();
     }
@@ -110,6 +118,7 @@ impl SidePanel {
         self.host_mount_path = None;
         self._watch_bridge = None;
         self._watch_task = None;
+        self.changes_tab.service = None;
         self.changes_tab.clear();
         cx.notify();
     }

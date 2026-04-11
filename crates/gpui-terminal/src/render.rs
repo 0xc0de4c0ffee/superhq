@@ -727,7 +727,7 @@ impl TerminalRenderer {
             self.paint_selection(sel_range, display_offset, num_lines, num_cols, origin, window);
         }
 
-        // Paint cursor — only visible when not scrolled back
+        // Paint cursor, only visible when not scrolled back
         use crate::terminal::CursorShape;
 
         if display_offset != 0 {

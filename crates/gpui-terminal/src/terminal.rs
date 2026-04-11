@@ -125,7 +125,7 @@ impl Default for TerminalContent {
 }
 
 // ---------------------------------------------------------------------------
-// TerminalState — the core state wrapper
+// TerminalState: the core state wrapper
 // ---------------------------------------------------------------------------
 
 /// Thread-safe terminal state with deferred event processing.
