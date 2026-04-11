@@ -1,6 +1,6 @@
 [package]
 name = "superhq"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 
 [dependencies]
@@ -10,7 +10,7 @@ gpui-component-assets = "0.5"
 gpui-terminal = { path = "crates/gpui-terminal" }
 portable-pty = "0.9"
 parking_lot = "0.12"
-shuru-sdk = { path = "../shuru/crates/shuru-sdk" }
+shuru-sdk = { path = "../shuru/crates/shuru-sdk", features = ["cas"] }
 shuru-proto = { path = "../shuru/crates/shuru-proto" }
 tokio = { version = "1", features = ["full"] }
 rusqlite = { version = "0.32", features = ["bundled"] }

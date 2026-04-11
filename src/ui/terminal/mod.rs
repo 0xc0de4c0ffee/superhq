@@ -79,6 +79,8 @@ struct TerminalTab {
     agent_color: Option<Rgba>,
     icon_path: Option<SharedString>,
     kind: TabKind,
+    /// True while a checkpoint is being saved.
+    checkpointing: bool,
     /// Set when tab is checkpointed and stopped. Sandbox is gone but can be forked.
     checkpoint_name: Option<String>,
     /// DB row id for persisted checkpointed tabs (None for in-memory-only tabs).
@@ -425,6 +427,7 @@ impl TerminalPanel {
                     sandbox: None,
                     auth_gateway: None,
                 },
+                checkpointing: false,
                 checkpoint_name: saved.checkpoint_name.clone(),
                 tab_db_id: Some(saved.id),
             });
@@ -547,6 +550,7 @@ impl TerminalPanel {
                     sandbox: None,
                     auth_gateway: None,
                 },
+                checkpointing: false,
                 checkpoint_name: None,
                 tab_db_id: None,
             });
@@ -637,6 +641,7 @@ impl TerminalPanel {
                 let mut install_config = SandboxConfig::default();
                 install_config.allow_net = true;
                 install_config.env.insert("HOME".into(), "/root".into());
+                install_config.storage = shuru_sdk::StorageMode::Cas { cas_dir: None };
                 install_config.memory_mb = sb_settings_install.as_ref().map(|s| s.sandbox_memory_mb as u64).unwrap_or(8192);
                 install_config.disk_size_mb = sb_settings_install.as_ref().map(|s| s.sandbox_disk_mb as u64).unwrap_or(16384);
 
@@ -1000,6 +1005,7 @@ impl TerminalPanel {
             let mut config = SandboxConfig::default();
             config.allow_net = true;
             config.env.insert("HOME".into(), "/root".into());
+            config.storage = shuru_sdk::StorageMode::Cas { cas_dir: None };
             config.cpus = sb_settings.as_ref().map(|s| s.sandbox_cpus as usize).unwrap_or(2);
             config.memory_mb = sb_settings.as_ref().map(|s| s.sandbox_memory_mb as u64).unwrap_or(8192);
             config.disk_size_mb = sb_settings.as_ref().map(|s| s.sandbox_disk_mb as u64).unwrap_or(16384);
@@ -1321,7 +1327,8 @@ impl TerminalPanel {
                                 parent_agent_tab_id,
                                 sandbox: sandbox_for_kind,
                             },
-                            checkpoint_name: None,
+                            checkpointing: false,
+                checkpoint_name: None,
                             tab_db_id: None,
                                     });
                         session.active_tab = new_idx;
@@ -1400,39 +1407,82 @@ impl TerminalPanel {
     /// Persists the checkpointed tab to the DB so it survives app restart.
     fn checkpoint_tab(&mut self, ws_id: i64, tab_id: u64, cx: &mut Context<Self>) {
         self.pending_close = None;
+        let (sb, cp_name, agent_id, label) = {
+            let Some(session) = self.sessions.get(&ws_id) else { return };
+            let Some(tab) = session.tabs.iter().find(|t| t.tab_id == tab_id) else { return };
+            match &tab.kind {
+                TabKind::Agent { sandbox: Some(sandbox), agent_name, agent_id, .. } => {
+                    let name = format!("tab-{}-{}", agent_name.to_lowercase(), tab_id);
+                    (sandbox.clone(), name, *agent_id, tab.label.clone())
+                }
+                _ => return,
+            }
+        };
+
+        // Mark as checkpointing so the UI shows progress
         if let Some(session) = self.sessions.get_mut(&ws_id) {
             if let Some(tab) = session.tabs.iter_mut().find(|t| t.tab_id == tab_id) {
-                if let TabKind::Agent { sandbox: Some(sandbox), agent_name, agent_id, .. } = &tab.kind {
-                    let cp_name = format!("tab-{}-{}", agent_name.to_lowercase(), tab_id);
-                    let sb = sandbox.clone();
-                    let n = cp_name.clone();
-                    let handle = self.tokio_handle.clone();
-                    std::thread::spawn(move || {
-                        let _ = handle.block_on(async { sb.checkpoint(&n).await });
-                    });
-
-                    // Save to DB
-                    let db_id = self.db.save_checkpointed_tab(
-                        ws_id, &tab.label, *agent_id, &cp_name,
-                    ).ok();
-
-                    tab.terminal = None;
-                    tab.checkpoint_name = Some(cp_name);
-                    tab.tab_db_id = db_id;
-                }
-                if let TabKind::Agent { sandbox, .. } = &mut tab.kind {
-                    *sandbox = None;
-                }
-                let agent_tab_id = tab_id;
-                session.tabs.retain(|t| {
-                    match &t.kind {
-                        TabKind::Shell { parent_agent_tab_id, .. } => *parent_agent_tab_id != agent_tab_id,
-                        _ => true,
-                    }
-                });
+                tab.checkpointing = true;
             }
         }
         cx.notify();
+
+        let tokio_handle = self.tokio_handle.clone();
+        let db = self.db.clone();
+
+        // Await checkpoint completion before tearing down the sandbox
+        cx.spawn(async move |this, cx| {
+            let cp_result = {
+                let n = cp_name.clone();
+                tokio_handle
+                    .spawn(async move { sb.checkpoint(&n).await })
+                    .await
+                    .unwrap()
+            };
+
+            if let Err(e) = cp_result {
+                eprintln!("Checkpoint failed: {e}");
+                let _ = cx.update(|cx| {
+                    this.update(cx, |panel, cx| {
+                        if let Some(session) = panel.sessions.get_mut(&ws_id) {
+                            if let Some(tab) = session.tabs.iter_mut().find(|t| t.tab_id == tab_id) {
+                                tab.checkpointing = false;
+                            }
+                        }
+                        cx.notify();
+                    }).ok();
+                });
+                return;
+            }
+
+            let _ = cx.update(|cx| {
+                this.update(cx, |panel, cx| {
+                    let db_id = db.save_checkpointed_tab(
+                        ws_id, &label, agent_id, &cp_name,
+                    ).ok();
+
+                    if let Some(session) = panel.sessions.get_mut(&ws_id) {
+                        if let Some(tab) = session.tabs.iter_mut().find(|t| t.tab_id == tab_id) {
+                            tab.checkpointing = false;
+                            tab.terminal = None;
+                            tab.checkpoint_name = Some(cp_name);
+                            tab.tab_db_id = db_id;
+                            if let TabKind::Agent { sandbox, .. } = &mut tab.kind {
+                                *sandbox = None;
+                            }
+                        }
+                        // Remove child shell tabs
+                        session.tabs.retain(|t| {
+                            match &t.kind {
+                                TabKind::Shell { parent_agent_tab_id, .. } => *parent_agent_tab_id != tab_id,
+                                _ => true,
+                            }
+                        });
+                    }
+                    cx.notify();
+                }).ok();
+            });
+        }).detach();
     }
 
     /// Called when the settings panel is closed.
@@ -1966,6 +2016,9 @@ impl Render for TerminalPanel {
                 let active_tab_stopped = session.tabs.get(active_tab_idx)
                     .filter(|t| t.is_stopped())
                     .map(|t| t.tab_id);
+                let active_tab_checkpointing = session.tabs.get(active_tab_idx)
+                    .filter(|t| t.checkpointing)
+                    .is_some();
 
                 // Build tab bar items
                 let mut tab_elements: Vec<Stateful<Div>> = Vec::new();
@@ -2455,6 +2508,20 @@ impl Render for TerminalPanel {
                             .size_full()
                             .child(self.render_setup_view(&steps, &error, color, &icon)),
                     );
+                } else if active_tab_checkpointing {
+                    content = content.child(
+                        div()
+                            .size_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(t::text_ghost())
+                                    .child("Saving checkpoint\u{2026}"),
+                            ),
+                    );
                 } else if let Some(stopped_tab_id) = active_tab_stopped {
                     // Stopped/checkpointed tab — show action bar + empty state
                     let fork_ws = ws_id;
@@ -2551,14 +2618,6 @@ impl Render for TerminalPanel {
 
                 // Status bar: resources on left, ports on right
                 if has_tabs {
-                    let sb_settings = self.db.get_settings().ok();
-                    let cpus = sb_settings.as_ref().map(|s| s.sandbox_cpus).unwrap_or(2);
-                    let mem_mb = sb_settings.as_ref().map(|s| s.sandbox_memory_mb).unwrap_or(8192);
-                    let mem_display = if mem_mb >= 1024 && mem_mb % 1024 == 0 {
-                        format!("{} GB", mem_mb / 1024)
-                    } else {
-                        format!("{} MB", mem_mb)
-                    };
                     let port_count = self.db.get_port_mappings(ws_id)
                         .map(|m| m.len())
                         .unwrap_or(0)
@@ -2598,15 +2657,6 @@ impl Render for TerminalPanel {
                             .bg(t::bg_elevated())
                             .border_t_1()
                             .border_color(t::border())
-                            // Left: resources
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_2()
-                                    .child(status_item("cpu-info", "icons/cpu.svg", format!("{} CPU", cpus)))
-                                    .child(status_item("mem-info", "icons/memory.svg", mem_display)),
-                            )
                             // Right: ports
                             .child(
                                 status_item(
