@@ -5,6 +5,7 @@ use gpui_component::Sizable as _;
 
 use crate::db::{Database, ExposeHostPort, PortMapping};
 use crate::ui::theme as t;
+use shuru_sdk::AsyncSandbox;
 use std::sync::Arc;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -22,6 +23,8 @@ enum View {
 pub struct PortsDialog {
     db: Arc<Database>,
     workspace_id: i64,
+    sandbox: Option<Arc<AsyncSandbox>>,
+    tokio_handle: tokio::runtime::Handle,
     tab: Tab,
     view: View,
     input_a: Entity<InputState>,
@@ -34,6 +37,8 @@ impl PortsDialog {
     pub fn new(
         db: Arc<Database>,
         workspace_id: i64,
+        sandbox: Option<Arc<AsyncSandbox>>,
+        tokio_handle: tokio::runtime::Handle,
         on_dismiss: impl Fn(&mut Window, &mut App) + 'static,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -45,6 +50,8 @@ impl PortsDialog {
         Self {
             db,
             workspace_id,
+            sandbox,
+            tokio_handle,
             tab: Tab::Forward,
             view: View::List,
             input_a,
@@ -111,13 +118,41 @@ impl PortsDialog {
                 _ => return,
             }
         };
-        if let Err(e) = self.db.add_port_mapping(self.workspace_id, &PortMapping { guest_port, host_port }) {
-            eprintln!("[ports] failed to add: {e}");
-            return;
+        if let Some(sb) = &self.sandbox {
+            // Bind first, save to DB only on success
+            let sb = sb.clone();
+            let db = self.db.clone();
+            let ws_id = self.workspace_id;
+            let th = self.tokio_handle.clone();
+            cx.spawn(async move |this, cx| {
+                let result = th.spawn(async move {
+                    sb.add_port_forward(host_port, guest_port).await
+                }).await.unwrap();
+                let _ = cx.update(|cx| {
+                    this.update(cx, |dialog, cx| {
+                        match result {
+                            Ok(()) => {
+                                if let Err(e) = db.add_port_mapping(ws_id, &PortMapping { guest_port, host_port }) {
+                                    eprintln!("[ports] failed to save: {e}");
+                                }
+                            }
+                            Err(e) => eprintln!("[ports] failed to forward port: {e}"),
+                        }
+                        dialog.view = View::List;
+                        cx.notify();
+                    }).ok();
+                });
+            }).detach();
+        } else {
+            // No sandbox running — just save to DB for next boot
+            if let Err(e) = self.db.add_port_mapping(self.workspace_id, &PortMapping { guest_port, host_port }) {
+                eprintln!("[ports] failed to add: {e}");
+                return;
+            }
+            self.view = View::List;
+            self.focus_handle.focus(window);
+            cx.notify();
         }
-        self.view = View::List;
-        self.focus_handle.focus(window);
-        cx.notify();
     }
 
     fn submit_expose(&mut self, window: &mut Window, cx: &mut Context<Self>) {

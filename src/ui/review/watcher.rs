@@ -2,6 +2,7 @@ use super::changes_tab::{ChangedFile, FileStatus};
 use shuru_sdk::AsyncSandbox;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use tokio::sync::Notify;
 
 /// Patterns always ignored in the review panel, regardless of .gitignore.
 const BUILTIN_IGNORE_PATTERNS: &[&str] = &[
@@ -50,7 +51,14 @@ pub struct DiffResult {
 /// status (Added/Modified/Deleted), and sends results over a flume channel.
 /// Does NOT read file contents or compute diffs — those are done lazily on expand.
 pub struct WatchBridge {
+    stop: Arc<Notify>,
     _handle: std::thread::JoinHandle<()>,
+}
+
+impl Drop for WatchBridge {
+    fn drop(&mut self) {
+        self.stop.notify_one();
+    }
 }
 
 impl WatchBridge {
@@ -61,6 +69,8 @@ impl WatchBridge {
         host_mount_path: Option<String>,
     ) -> Option<(Self, flume::Receiver<DiffResult>)> {
         let (tx, rx) = flume::unbounded::<DiffResult>();
+        let stop = Arc::new(Notify::new());
+        let stop_notify = stop.clone();
 
         let handle = std::thread::Builder::new()
             .name("shuru-watch-bridge".into())
@@ -70,6 +80,9 @@ impl WatchBridge {
                         Ok(w) => w,
                         Err(_) => return,
                     };
+                    // Drop our Arc so the watcher doesn't keep the VM alive.
+                    // The watch vsock stream is independent of the Arc.
+                    drop(sandbox);
 
                     let prefix = format!("{}/", workspace_path);
                     let mut cached_files: HashMap<String, ChangedFile> = HashMap::new();
@@ -81,10 +94,13 @@ impl WatchBridge {
                     );
 
                     loop {
-                        // Block until first event
-                        let event = match watch.receiver.recv().await {
-                            Some(e) => e,
-                            None => break,
+                        // Block until event or stop signal
+                        let event = tokio::select! {
+                            e = watch.receiver.recv() => match e {
+                                Some(e) => e,
+                                None => break,
+                            },
+                            _ = stop_notify.notified() => break,
                         };
 
                         let mut raw_paths: Vec<(String, u8)> = vec![(event.path, event.kind)];
@@ -167,6 +183,6 @@ impl WatchBridge {
             })
             .ok()?;
 
-        Some((Self { _handle: handle }, rx))
+        Some((Self { stop, _handle: handle }, rx))
     }
 }
