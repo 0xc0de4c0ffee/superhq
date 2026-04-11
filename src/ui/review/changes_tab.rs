@@ -146,7 +146,9 @@ impl ChangesTab {
 
     pub fn render(&mut self, cx: &mut Context<super::SidePanel>) -> AnyElement {
         let has_changes = !self.changed_files.is_empty();
-        let mut content = div().size_full().flex().flex_col();
+        // flex_grow + min_h_0: fill remaining space from parent flex_col,
+        // min_h_0 allows shrinking below content height so scroll works.
+        let mut content = div().flex_grow().min_h_0().w_full().flex().flex_col();
 
         if !has_changes {
             return content
@@ -230,7 +232,7 @@ impl ChangesTab {
         );
 
         if !self.file_diffs.is_empty() {
-            let mut scroll = div().flex_grow().flex().flex_col().overflow_y_scrollbar().pt_1();
+            let mut scroll = div().flex_grow().min_h_0().flex().flex_col().overflow_y_scrollbar().pt_1();
 
             for file in &self.changed_files {
                 let diff = self.file_diffs.get(&file.path);

@@ -636,6 +636,7 @@ impl TerminalPanel {
                 let sb_settings_install = db_for_secrets.get_settings().ok();
                 let mut install_config = SandboxConfig::default();
                 install_config.allow_net = true;
+                install_config.env.insert("HOME".into(), "/root".into());
                 install_config.memory_mb = sb_settings_install.as_ref().map(|s| s.sandbox_memory_mb as u64).unwrap_or(8192);
                 install_config.disk_size_mb = sb_settings_install.as_ref().map(|s| s.sandbox_disk_mb as u64).unwrap_or(16384);
 
@@ -848,6 +849,21 @@ impl TerminalPanel {
                     }
                 }
 
+                // Ensure login shells source .bashrc (tool installers write PATH there,
+                // but bash -l only reads .bash_profile/.profile by default).
+                {
+                    let sb = install_sb.clone();
+                    let _ = tokio_handle
+                        .spawn(async move {
+                            // Only create if it doesn't exist — don't overwrite
+                            // an installer-created .bash_profile
+                            if sb.read_file("/root/.bash_profile").await.is_err() {
+                                let _ = sb.write_file("/root/.bash_profile", b"[ -f ~/.bashrc ] && . ~/.bashrc\n").await;
+                            }
+                        })
+                        .await;
+                }
+
                 // All install steps done → Saving checkpoint
                 let save_step_ix = install_steps.len() + 1;
                 cx.update(|cx| {
@@ -983,6 +999,7 @@ impl TerminalPanel {
             let sb_settings = db_for_secrets.get_settings().ok();
             let mut config = SandboxConfig::default();
             config.allow_net = true;
+            config.env.insert("HOME".into(), "/root".into());
             config.cpus = sb_settings.as_ref().map(|s| s.sandbox_cpus as usize).unwrap_or(2);
             config.memory_mb = sb_settings.as_ref().map(|s| s.sandbox_memory_mb as u64).unwrap_or(8192);
             config.disk_size_mb = sb_settings.as_ref().map(|s| s.sandbox_disk_mb as u64).unwrap_or(16384);

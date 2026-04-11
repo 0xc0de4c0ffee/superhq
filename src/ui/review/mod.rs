@@ -161,14 +161,14 @@ impl SidePanel {
 impl Render for SidePanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if !self.visible {
-            return div();
+            return div().id("review-panel");
         }
 
         div()
+            .id("review-panel")
             .size_full()
             .flex()
             .flex_col()
-            .overflow_hidden()
             .child(
                 div()
                     .h(px(36.0))
@@ -187,13 +187,6 @@ impl Render for SidePanel {
                             .child("Review"),
                     ),
             )
-            .child(
-                div()
-                    .flex_grow()
-                    .flex()
-                    .flex_col()
-                    .overflow_hidden()
-                    .child(self.changes_tab.render(cx)),
-            )
+            .child(self.changes_tab.render(cx))
     }
 }

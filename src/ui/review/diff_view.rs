@@ -750,7 +750,7 @@ pub fn render_file_section(
     on_keep: Option<Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>>,
     on_discard: Option<Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>>,
 ) -> Div {
-    let mut el = div().flex().flex_col().pb_1();
+    let mut el = div().flex().flex_col().flex_shrink_0().pb_1();
     el = el.child(render_header(path, status, stats, expanded, on_keep, on_discard));
 
     if !expanded.get() {
@@ -767,7 +767,7 @@ pub fn render_file_section(
             let block_height = lines.len() as f32 * LINE_HEIGHT + SCROLLBAR_TRACK_HEIGHT;
 
             el = el.child(
-                div().mx_1().h(px(block_height)).child(
+                div().mx_1().flex_shrink_0().h(px(block_height)).child(
                     DiffBlock::new(
                         ElementId::Name(SharedString::from(format!("diff-{}", path))),
                         lines.clone(),
