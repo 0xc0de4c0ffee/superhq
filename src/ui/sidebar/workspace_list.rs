@@ -119,6 +119,14 @@ impl WorkspaceListView {
             self.active_workspace_id,
             cx,
         );
+        // Re-apply badge state to new views
+        if self.cmd_held {
+            for (i, view) in self.workspace_views.iter().enumerate() {
+                view.update(cx, |item, _| {
+                    item.badge_index = if i < 9 { Some(i + 1) } else { None };
+                });
+            }
+        }
         cx.notify();
     }
 

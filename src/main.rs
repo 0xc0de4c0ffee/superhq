@@ -474,7 +474,14 @@ fn main() -> Result<()> {
                                 "7" => Some(6), "8" => Some(7), "9" => Some(8),
                                 _ => None,
                             } {
-                                sidebar.update(cx, |v, cx| v.activate_by_index(n, window, cx));
+                                sidebar.update(cx, |v, cx| {
+                                    v.activate_by_index(n, window, cx);
+                                    v.set_show_badges(false, cx);
+                                });
+                                app_view.update(cx, |this, _cx| {
+                                    this.cmd_held = false;
+                                    this.focus_handle.focus(window);
+                                });
                                 cx.stop_propagation();
                             }
                         }
