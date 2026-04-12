@@ -239,8 +239,9 @@ impl Render for TerminalPanel {
                             cx.stop_propagation();
                         })
                         .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                            use crate::ui::components::actions::{KEY_UP, KEY_DOWN, KEY_ENTER, KEY_ESCAPE};
                             match event.keystroke.key.as_str() {
-                                "up" => {
+                                KEY_UP => {
                                     if total_items > 0 {
                                         this.agent_menu_index = if this.agent_menu_index == 0 {
                                             total_items - 1
@@ -250,16 +251,16 @@ impl Render for TerminalPanel {
                                         cx.notify();
                                     }
                                 }
-                                "down" => {
+                                KEY_DOWN => {
                                     if total_items > 0 {
                                         this.agent_menu_index = (this.agent_menu_index + 1) % total_items;
                                         cx.notify();
                                     }
                                 }
-                                "enter" => {
+                                KEY_ENTER => {
                                     this.activate_agent_menu_item(window, cx);
                                 }
-                                "escape" => {
+                                KEY_ESCAPE => {
                                     this.show_agent_menu = false;
                                     cx.notify();
                                 }

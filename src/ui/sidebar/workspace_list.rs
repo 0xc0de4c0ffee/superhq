@@ -17,7 +17,6 @@ pub struct WorkspaceListView {
     pub active_workspace_id: Option<i64>,
     pub cmd_held: bool,
     on_new_workspace: std::rc::Rc<dyn Fn(&mut Window, &mut App) + 'static>,
-    on_workspace_activated: std::rc::Rc<dyn Fn(&mut App) + 'static>,
 }
 
 impl WorkspaceListView {
@@ -26,13 +25,11 @@ impl WorkspaceListView {
         terminal_panel: Entity<TerminalPanel>,
         review_panel: Entity<SidePanel>,
         on_new_workspace: impl Fn(&mut Window, &mut App) + 'static,
-        on_workspace_activated: impl Fn(&mut App) + 'static,
         cx: &mut Context<Self>,
     ) -> Self {
         let workspaces = db.list_workspaces().unwrap_or_default();
         let active_workspace_id = None;
         let on_new_workspace = std::rc::Rc::new(on_new_workspace);
-        let on_workspace_activated = std::rc::Rc::new(on_workspace_activated);
         let workspace_views =
             Self::build_views(&db, &workspaces, &terminal_panel, &review_panel, active_workspace_id, cx);
 
@@ -59,7 +56,6 @@ impl WorkspaceListView {
             active_workspace_id,
             cmd_held: false,
             on_new_workspace,
-            on_workspace_activated,
         }
     }
 
@@ -83,7 +79,6 @@ impl WorkspaceListView {
                 panel.notify_side_panel_pub(ws_id, cx);
             });
             self.active_workspace_id = Some(ws_id);
-            (self.on_workspace_activated)(cx);
             self.refresh(cx);
         }
     }
@@ -173,7 +168,6 @@ impl WorkspaceListView {
             move |id: i64, cx: &mut App| {
                 this.update(cx, |view: &mut WorkspaceListView, cx| {
                     view.active_workspace_id = Some(id);
-                    (view.on_workspace_activated)(cx);
                     view.refresh(cx);
                 })
                 .ok();

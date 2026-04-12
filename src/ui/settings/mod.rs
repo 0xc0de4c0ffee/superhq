@@ -6,6 +6,7 @@ mod shortcuts;
 
 use gpui::*;
 use gpui::prelude::FluentBuilder as _;
+use crate::ui::components::actions::Cancel;
 use crate::ui::components::TextInput;
 use crate::ui::components::Toast;
 use std::sync::Arc;
@@ -102,7 +103,7 @@ impl SettingsPanel {
         db: Arc<Database>,
         toast: Entity<Toast>,
         on_close: impl Fn(&mut Window, &mut App) + 'static,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let agents = db.list_agents().unwrap_or_default();
@@ -181,6 +182,7 @@ impl SettingsPanel {
         let default_agent_id = settings.as_ref().and_then(|s| s.default_agent_id);
         let agent_dropdown = Self::init_agent_dropdown(&all_agents, default_agent_id, cx);
         let focus_handle = cx.focus_handle();
+        focus_handle.focus(window);
 
         Self {
             db,
@@ -256,7 +258,9 @@ impl Render for SettingsPanel {
             .child(
                 div()
                     .id("settings-card")
+                    .key_context("Dialog")
                     .track_focus(&self.focus_handle)
+                    .tab_group()
                     .w(px(720.0))
                     .h(px(520.0))
                     .bg(t::bg_surface())
@@ -269,15 +273,20 @@ impl Render for SettingsPanel {
                     .on_mouse_down_out(cx.listener(|this, _, window, cx| {
                         this.close(window, cx);
                     }))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                        if event.keystroke.key == "escape" {
-                            if this.focus_handle.is_focused(window) {
-                                this.close(window, cx);
-                            } else {
-                                this.focus_handle.focus(window);
-                            }
-                        }
+                    .on_action(cx.listener(|this, _: &Cancel, window, cx| {
+                        this.close(window, cx);
                     }))
+                    .on_key_down(|event, window, cx| {
+                        use crate::ui::components::actions::KEY_TAB;
+                        if event.keystroke.key.as_str() == KEY_TAB {
+                            if event.keystroke.modifiers.shift {
+                                window.focus_prev();
+                            } else {
+                                window.focus_next();
+                            }
+                            cx.stop_propagation();
+                        }
+                    })
                     // Top bar
                     .child(
                         div()

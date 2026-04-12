@@ -1,6 +1,7 @@
 use gpui::*;
 use gpui::prelude::FluentBuilder as _;
 
+use crate::ui::components::actions::{Cancel, KEY_TAB};
 use crate::db::{Database, ExposeHostPort, PortMapping};
 use crate::ui::components::TextInput;
 use crate::ui::theme as t;
@@ -503,15 +504,25 @@ impl Render for PortsDialog {
             .child(
                 div()
                     .id("ports-dialog-card")
+                    .key_context("Dialog")
                     .track_focus(&self.focus_handle)
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                        if event.keystroke.key == "escape" {
-                            match this.view {
-                                View::AddForward | View::AddExposeHost => this.cancel_add(window, cx),
-                                View::List => this.dismiss(window, cx),
-                            }
+                    .tab_group()
+                    .on_action(cx.listener(|this, _: &Cancel, window, cx| {
+                        match this.view {
+                            View::AddForward | View::AddExposeHost => this.cancel_add(window, cx),
+                            View::List => this.dismiss(window, cx),
                         }
                     }))
+                    .on_key_down(|event, window, cx| {
+                        if event.keystroke.key.as_str() == KEY_TAB {
+                            if event.keystroke.modifiers.shift {
+                                window.focus_prev();
+                            } else {
+                                window.focus_next();
+                            }
+                            cx.stop_propagation();
+                        }
+                    })
                     .w(px(380.0))
                     .bg(t::bg_surface())
                     .border_1()

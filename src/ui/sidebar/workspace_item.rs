@@ -343,7 +343,8 @@ impl Render for WorkspaceItemView {
                         this.close_menu(cx);
                     }))
                     .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                        if event.keystroke.key.as_str() == "escape" {
+                        use crate::ui::components::actions::KEY_ESCAPE;
+                        if event.keystroke.key.as_str() == KEY_ESCAPE {
                             this.close_menu(cx);
                         }
                     })),

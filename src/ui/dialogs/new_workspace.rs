@@ -131,12 +131,24 @@ impl Render for NewWorkspaceDialog {
                     .id("dialog-card")
                     .key_context("Dialog")
                     .track_focus(&self.focus_handle)
+                    .tab_group()
                     .on_action(cx.listener(|this, _: &Cancel, window, cx| {
                         this.dismiss(window, cx);
                     }))
                     .on_action(cx.listener(|this, _: &Confirm, window, cx| {
                         this.submit(window, cx);
                     }))
+                    .on_key_down(|event, window, cx| {
+                        use crate::ui::components::actions::KEY_TAB;
+                        if event.keystroke.key.as_str() == KEY_TAB {
+                            if event.keystroke.modifiers.shift {
+                                window.focus_prev();
+                            } else {
+                                window.focus_next();
+                            }
+                            cx.stop_propagation();
+                        }
+                    })
                     .w(px(380.0))
                     .bg(t::bg_surface())
                     .border_1()

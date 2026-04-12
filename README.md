@@ -32,13 +32,7 @@ Or download the latest `.dmg` from the [Releases](https://github.com/superhq-ai/
 
 ## Security Model
 
-Agents run inside sandboxed VMs and **never see your real API keys**. Instead, SuperHQ uses an **auth gateway** — a reverse proxy running on the host that:
-
-1. Injects a dummy API key into the sandbox environment
-2. Intercepts outgoing API requests from the agent
-3. Swaps the dummy key for your real credentials before forwarding upstream
-
-This means even if an agent is compromised or tries to exfiltrate credentials, it only has access to a useless placeholder token. Your real keys never touch the sandbox filesystem or environment.
+Agents run inside sandboxed VMs and **never see your real API keys**. SuperHQ uses an **auth gateway** — a reverse proxy on the host that injects credentials into outgoing API requests without exposing them to the sandbox.
 
 For Codex with OAuth, the gateway handles token refresh and forwards authenticated requests to `chatgpt.com/backend-api/codex` — so your ChatGPT Plus/Pro subscription works out of the box.
 
@@ -77,6 +71,8 @@ For Codex with OAuth, the gateway handles token refresh and forwards authenticat
 | Action | Shortcut |
 |--------|----------|
 | Settings | `Cmd+,` |
+| Toggle review panel | `Cmd+B` |
+| Ports | `Cmd+Shift+P` |
 
 Hold `Cmd` to see workspace shortcut badges. Hold `Ctrl` to see tab badges.
 

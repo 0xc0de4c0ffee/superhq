@@ -27,6 +27,7 @@ actions!(
         ActivateTab4, ActivateTab5, ActivateTab6,
         ActivateTab7, ActivateTab8, ActivateTab9,
         ToggleRightDock,
+        OpenPortsDialog,
     ]
 );
 /// Drag payload for resizing panels.
@@ -103,7 +104,6 @@ impl AppView {
             panel.set_side_panel(review.clone());
         });
         let this = cx.entity().downgrade();
-        let this2 = cx.entity().downgrade();
         let sidebar = cx.new(|cx| {
             WorkspaceListView::new(
                 db.clone(),
@@ -112,12 +112,6 @@ impl AppView {
                 move |window, cx| {
                     this.update(cx, |app, cx| {
                         app.open_new_workspace_dialog(window, cx);
-                    }).ok();
-                },
-                move |cx| {
-                    this2.update(cx, |app, cx| {
-                        app.settings = None;
-                        cx.notify();
                     }).ok();
                 },
                 cx,
@@ -155,9 +149,8 @@ impl AppView {
         }
     }
 
-    fn close_settings(&mut self, cx: &mut Context<Self>) {
+    fn close_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.settings = None;
-        // Restore active workspace highlight in sidebar
         let active_ws = self.terminal.read(cx).active_workspace_id;
         if let Some(ws_id) = active_ws {
             self.sidebar.update(cx, |view, cx| {
@@ -165,6 +158,7 @@ impl AppView {
                 view.refresh(cx);
             });
         }
+        self.focus_handle.focus(window);
         cx.notify();
     }
 
@@ -181,9 +175,9 @@ impl AppView {
             SettingsPanel::new(
                 db,
                 toast,
-                move |_window, cx| {
+                move |window, cx| {
                     this.update(cx, |app, cx| {
-                        app.close_settings(cx);
+                        app.close_settings(window, cx);
                     })
                     .ok();
                     // Notify terminal panel to re-check missing secrets
@@ -209,9 +203,10 @@ impl AppView {
                 ws_id,
                 sandbox,
                 tokio_handle,
-                move |_window, cx| {
+                move |window, cx| {
                     this.update(cx, |app, cx| {
                         app.ports_dialog = None;
+                        app.focus_handle.focus(window);
                         cx.notify();
                     }).ok();
                 },
@@ -232,16 +227,18 @@ impl AppView {
         let view = cx.new(|cx| {
             NewWorkspaceDialog::new(
                 db,
-                move |_window, cx| {
+                move |window, cx| {
                     sidebar.update(cx, |view: &mut WorkspaceListView, cx| view.refresh(cx));
                     this.update(cx, |app, cx| {
                         app.dialog = None;
+                        app.focus_handle.focus(window);
                         cx.notify();
                     }).ok();
                 },
-                move |_window, cx| {
+                move |window, cx| {
                     this2.update(cx, |app, cx| {
                         app.dialog = None;
+                        app.focus_handle.focus(window);
                         cx.notify();
                     }).ok();
                 },
@@ -305,6 +302,18 @@ impl Render for AppView {
                     cx.notify();
                 });
                 cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &OpenPortsDialog, window, cx| {
+                let ws_id = match this.terminal.read(cx).active_workspace_id {
+                    Some(id) => id,
+                    None => return,
+                };
+                let sb_info = this.terminal.read(cx).get_active_sandbox(ws_id, cx);
+                let (sb, th) = match sb_info {
+                    Some((sb, th)) => (Some(sb), th),
+                    None => return,
+                };
+                this.open_ports_dialog(ws_id, sb, th, window, cx);
             }))
             // Custom titlebar — empty area is the OS drag region (appears_transparent).
             // Only interactive children (with on_click) eat mouse events.
@@ -451,7 +460,7 @@ impl Render for AppView {
                                             .on_click(
                                                 cx.listener(|this, _, window, cx| {
                                                     if this.settings.is_some() {
-                                                        this.close_settings(cx);
+                                                        this.close_settings(window, cx);
                                                     } else {
                                                         this.open_settings(window, cx);
                                                     }
@@ -572,6 +581,7 @@ fn main() -> Result<()> {
             KeyBinding::new("cmd-n", NewWorkspaceAction, None),
             KeyBinding::new("cmd-,", OpenSettingsAction, None),
             KeyBinding::new("cmd-b", ToggleRightDock, None),
+            KeyBinding::new("cmd-shift-p", OpenPortsDialog, None),
             // Tab navigation
             KeyBinding::new("cmd-w", ui::terminal::CloseActiveTab, Some("Terminal")),
             // Workspace switching: cmd+1..9
@@ -716,7 +726,7 @@ fn main() -> Result<()> {
                         if m.platform && !m.shift && !m.control && !m.alt && key == "," {
                             app_view.update(cx, |app, cx| {
                                 if app.settings.is_some() {
-                                    app.close_settings(cx);
+                                    app.close_settings(window, cx);
                                 } else {
                                     app.open_settings(window, cx);
                                 }
