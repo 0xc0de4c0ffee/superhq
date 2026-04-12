@@ -730,17 +730,17 @@ impl Render for TerminalPanel {
                             .flex()
                             .flex_col()
                             .items_center()
-                            .gap_2()
+                            .gap_1()
                             .child(
-                                div().text_sm().text_color(t::text_faint()).child(
+                                div().text_xs().text_color(t::text_ghost()).child(
                                     "No workspace selected",
                                 ),
                             )
                             .child(
                                 div()
                                     .text_xs()
-                                    .text_color(t::text_invisible())
-                                    .child("Create one from the sidebar to get started"),
+                                    .text_color(t::text_faint())
+                                    .child("\u{2318}N to create one"),
                             ),
                     )
             }

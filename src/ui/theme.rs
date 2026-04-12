@@ -51,6 +51,9 @@ fn parse_hex_to_rgba(hex: &str) -> Option<Rgba> {
 #[derive(Deserialize)]
 pub struct ThemeColors {
     pub bg_base: Color,
+    pub bg_terminal: Color,
+    pub terminal_foreground: Color,
+    pub terminal_cursor: Color,
     pub bg_surface: Color,
     pub bg_elevated: Color,
     pub bg_hover: Color,
@@ -104,6 +107,9 @@ static THEME: LazyLock<ThemeColors> = LazyLock::new(|| {
 // ── Public accessors (same API as before) ──────────────────────
 
 pub fn bg_base() -> Rgba { THEME.bg_base.0 }
+pub fn bg_terminal() -> Rgba { THEME.bg_terminal.0 }
+pub fn terminal_foreground() -> Rgba { THEME.terminal_foreground.0 }
+pub fn terminal_cursor() -> Rgba { THEME.terminal_cursor.0 }
 pub fn bg_surface() -> Rgba { THEME.bg_surface.0 }
 pub fn bg_elevated() -> Rgba { THEME.bg_elevated.0 }
 pub fn bg_hover() -> Rgba { THEME.bg_hover.0 }
@@ -234,4 +240,13 @@ pub fn menu_separator() -> Div {
 
 pub fn parse_hex_color(hex: &str) -> Option<Rgba> {
     parse_hex_to_rgba(hex)
+}
+
+/// Returns (r, g, b) as u8 values for a theme color. Used by terminal config.
+pub fn rgb_bytes(color: Rgba) -> (u8, u8, u8) {
+    (
+        (color.r * 255.0) as u8,
+        (color.g * 255.0) as u8,
+        (color.b * 255.0) as u8,
+    )
 }

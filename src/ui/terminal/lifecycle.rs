@@ -322,11 +322,16 @@ impl super::TerminalPanel {
             scrollback: 10000,
             line_height_multiplier: 1.3,
             padding: Edges::all(px(8.0)),
-            colors: ColorPalette::builder()
-                .background(0x11, 0x11, 0x11)
-                .foreground(0xcc, 0xcc, 0xcc)
-                .cursor(0xcc, 0xcc, 0xcc)
-                .build(),
+            colors: {
+                let (br, bg, bb) = t::rgb_bytes(t::bg_terminal());
+                let (fr, fg, fb) = t::rgb_bytes(t::terminal_foreground());
+                let (cr, cg, cb) = t::rgb_bytes(t::terminal_cursor());
+                ColorPalette::builder()
+                    .background(br, bg, bb)
+                    .foreground(fr, fg, fb)
+                    .cursor(cr, cg, cb)
+                    .build()
+            },
         }
     }
 }

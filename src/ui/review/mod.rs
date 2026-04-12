@@ -12,7 +12,6 @@ use diff_service::DiffService;
 use watcher::{DiffResult, WatchBridge};
 
 use crate::ui::dock::{DockPosition, Panel, PanelEvent};
-use crate::ui::theme as t;
 use gpui::*;
 use shuru_sdk::AsyncSandbox;
 use std::collections::HashMap;
@@ -238,24 +237,6 @@ impl Render for SidePanel {
             .size_full()
             .flex()
             .flex_col()
-            .child(
-                div()
-                    .h(px(36.0))
-                    .flex_shrink_0()
-                    .w_full()
-                    .flex()
-                    .items_center()
-                    .px_2()
-                    .bg(t::bg_elevated())
-                    .border_b_1()
-                    .border_color(t::border())
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(t::text_secondary())
-                            .child("Review"),
-                    ),
-            )
             .child(self.changes_tab.render(cx))
     }
 }

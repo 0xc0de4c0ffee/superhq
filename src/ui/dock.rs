@@ -82,7 +82,10 @@ pub struct Dock {
     panels: Vec<Box<dyn PanelHandle>>,
     active_panel: Option<usize>,
     size: Pixels,
+    /// Panel-driven: true when the active panel has content.
     pub visible: bool,
+    /// User-driven: true when the user manually collapsed the dock.
+    pub collapsed: bool,
 }
 
 impl Dock {
@@ -93,6 +96,7 @@ impl Dock {
             active_panel: None,
             size: px(320.0),
             visible: false,
+            collapsed: false,
         }
     }
 
@@ -123,6 +127,20 @@ impl Dock {
 
     pub fn active_panel(&self) -> Option<&dyn PanelHandle> {
         self.active_panel.and_then(|i| self.panels.get(i).map(|p| p.as_ref()))
+    }
+
+    /// True when the dock should be rendered (panel has content AND user hasn't collapsed it).
+    pub fn is_visible(&self) -> bool {
+        self.visible && !self.collapsed
+    }
+
+    /// True when the dock has content but was collapsed by the user (show the expand strip).
+    pub fn is_collapsed(&self) -> bool {
+        self.visible && self.collapsed
+    }
+
+    pub fn toggle_collapsed(&mut self) {
+        self.collapsed = !self.collapsed;
     }
 
     pub fn set_size(&mut self, size: Pixels) {
@@ -296,6 +314,8 @@ impl Render for Dock {
             Some(panel) => div()
                 .id("dock-content")
                 .size_full()
+                .flex()
+                .flex_col()
                 .child(panel.to_any_element(window, cx)),
             None => div().id("dock-empty"),
         }

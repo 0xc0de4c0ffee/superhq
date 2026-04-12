@@ -26,6 +26,7 @@ actions!(
         ActivateTab1, ActivateTab2, ActivateTab3,
         ActivateTab4, ActivateTab5, ActivateTab6,
         ActivateTab7, ActivateTab8, ActivateTab9,
+        ToggleRightDock,
     ]
 );
 /// Drag payload for resizing panels.
@@ -267,14 +268,18 @@ impl Render for AppView {
                 .into_any_element();
         }
 
-        let show_review = self.right_dock.read(cx).visible;
+        let show_review = self.right_dock.read(cx).is_visible();
         let show_settings = self.settings.is_some();
+
+        let dock_is_active = self.right_dock.read(cx).visible;
 
         div()
             .id("app-root")
             .track_focus(&self.focus_handle)
             .size_full()
             .bg(t::bg_base())
+            .flex()
+            .flex_col()
             .on_modifiers_changed(cx.listener(|this, event: &ModifiersChangedEvent, _window, cx| {
                 let cmd = event.modifiers.platform;
                 let ctrl = event.modifiers.control;
@@ -294,11 +299,89 @@ impl Render for AppView {
             .on_action(cx.listener(|this, _: &OpenSettingsAction, window, cx| {
                 this.open_settings(window, cx);
             }))
+            .on_action(cx.listener(|this, _: &ToggleRightDock, _, cx| {
+                this.right_dock.update(cx, |dock, cx| {
+                    dock.toggle_collapsed();
+                    cx.notify();
+                });
+                cx.notify();
+            }))
+            // Custom titlebar — empty area is the OS drag region (appears_transparent).
+            // Only interactive children (with on_click) eat mouse events.
+            .child(
+                div()
+                    .id("titlebar")
+                    .h(px(36.0))
+                    .flex_shrink_0()
+                    .w_full()
+                    .flex()
+                    .items_center()
+                    .border_b_1()
+                    .border_color(t::border_subtle())
+                    .on_click(|event, window, _cx| {
+                        if event.click_count() == 2 {
+                            window.titlebar_double_click();
+                        }
+                    })
+                    // Left: spacer for traffic lights
+                    .child(div().w(px(78.0)).flex_shrink_0())
+                    // Center: title
+                    .child(
+                        div()
+                            .flex_grow()
+                            .flex()
+                            .justify_center()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(t::text_ghost())
+                                    .child("superhq"),
+                            ),
+                    )
+                    // Right: layout icons
+                    .child(
+                        div()
+                            .w(px(78.0))
+                            .flex_shrink_0()
+                            .flex()
+                            .justify_end()
+                            .pr_1()
+                            .when(dock_is_active, |el| {
+                                el.child(
+                                    div()
+                                        .id("toggle-right-dock")
+                                        .p(px(5.0))
+                                        .rounded(px(4.0))
+                                        .cursor_pointer()
+                                        .hover(|s: StyleRefinement| s.bg(t::bg_hover()))
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.right_dock.update(cx, |dock, cx| {
+                                                dock.toggle_collapsed();
+                                                cx.notify();
+                                            });
+                                            cx.notify();
+                                        }))
+                                        .child(
+                                            svg()
+                                                .path(SharedString::from("icons/sidebar-right.svg"))
+                                                .size(px(14.0))
+                                                .text_color(if show_review {
+                                                    t::text_secondary()
+                                                } else {
+                                                    t::text_ghost()
+                                                }),
+                                        ),
+                                )
+                            }),
+                    ),
+            )
             .child({
                 let dock_size = self.right_dock.read(cx).size();
                 div()
                     .id("workspace-layout")
-                    .size_full()
+                    .w_full()
+                    .flex_grow()
+                    .min_h_0()
                     .flex()
                     .flex_row()
                     .on_drag_move::<PanelResize>({
@@ -334,6 +417,8 @@ impl Render for AppView {
                             .w(self.sidebar_size)
                             .flex_shrink_0()
                             .bg(t::bg_surface())
+                            .border_r_1()
+                            .border_color(t::border())
                             .flex()
                             .flex_col()
                             .child(
@@ -392,18 +477,27 @@ impl Render for AppView {
                                     ),
                             ),
                     )
-                    // Sidebar resize handle
+                    // Sidebar resize handle — invisible 6px hit area, 2px highlight on hover
                     .child(
                         div()
                             .id("sidebar-resize")
-                            .w(px(4.0))
+                            .w(px(6.0))
+                            .ml(px(-3.0))
                             .h_full()
                             .flex_shrink_0()
                             .cursor(CursorStyle::ResizeLeftRight)
-                            .bg(t::border_strong())
+                            .flex()
+                            .justify_center()
+                            .group("sidebar-resize-group")
                             .on_drag(PanelResize::Sidebar, |_, _, _, cx| {
                                 cx.new(|_| ResizeDragView)
-                            }),
+                            })
+                            .child(
+                                div()
+                                    .w(px(2.0))
+                                    .h_full()
+                                    .group_hover("sidebar-resize-group", |s| s.bg(t::accent())),
+                            ),
                     )
                     // Center terminal
                     .child(
@@ -414,19 +508,28 @@ impl Render for AppView {
                             .bg(t::bg_base())
                             .child(self.terminal.clone()),
                     )
-                    // Right dock resize handle + panel (conditional)
+                    // Right dock resize handle + panel (when expanded)
                     .when(show_review, |el| {
                         el.child(
                             div()
                                 .id("dock-resize")
-                                .w(px(4.0))
+                                .w(px(6.0))
+                                .mr(px(-3.0))
                                 .h_full()
                                 .flex_shrink_0()
                                 .cursor(CursorStyle::ResizeLeftRight)
-                                .bg(t::border_strong())
+                                .flex()
+                                .justify_center()
+                                .group("dock-resize-group")
                                 .on_drag(PanelResize::RightDock, |_, _, _, cx| {
                                     cx.new(|_| ResizeDragView)
-                                }),
+                                })
+                                .child(
+                                    div()
+                                        .w(px(2.0))
+                                        .h_full()
+                                        .group_hover("dock-resize-group", |s| s.bg(t::accent())),
+                                ),
                         )
                         .child(
                             div()
@@ -434,6 +537,8 @@ impl Render for AppView {
                                 .h_full()
                                 .flex_shrink_0()
                                 .bg(t::bg_surface())
+                                .border_l_1()
+                                .border_color(t::border())
                                 .child(self.right_dock.clone()),
                         )
                     })
@@ -466,6 +571,7 @@ fn main() -> Result<()> {
         cx.bind_keys([
             KeyBinding::new("cmd-n", NewWorkspaceAction, None),
             KeyBinding::new("cmd-,", OpenSettingsAction, None),
+            KeyBinding::new("cmd-b", ToggleRightDock, None),
             // Tab navigation
             KeyBinding::new("cmd-w", ui::terminal::CloseActiveTab, Some("Terminal")),
             // Workspace switching: cmd+1..9
@@ -501,7 +607,8 @@ fn main() -> Result<()> {
                 ))),
                 titlebar: Some(TitlebarOptions {
                     title: Some("superhq".into()),
-                    ..Default::default()
+                    appears_transparent: true,
+                    traffic_light_position: Some(point(px(8.0), px(8.0))),
                 }),
                 ..Default::default()
             },
