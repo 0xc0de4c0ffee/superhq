@@ -363,6 +363,8 @@ impl Render for AppView {
                                         .rounded(px(4.0))
                                         .cursor_pointer()
                                         .hover(|s: StyleRefinement| s.bg(t::bg_hover()))
+                                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                                        .on_mouse_up(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.right_dock.update(cx, |dock, cx| {
                                                 dock.toggle_collapsed();
