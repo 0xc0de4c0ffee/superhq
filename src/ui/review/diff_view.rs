@@ -811,11 +811,17 @@ impl Element for DiffBlock {
                 }
             });
 
-            // MouseMove: extend selection + auto-scroll
+            // MouseMove: extend selection + auto-scroll (vertical + horizontal)
             window.on_mouse_event({
                 let selection = selection.clone();
                 let parent_scroll = self.parent_scroll.clone();
+                let h_scroll = self.scroll.clone();
                 let pos_to_lc = pos_to_line_col;
+                let content_left = gutter_x_end;
+                let content_right = bounds.origin.x + bounds.size.width;
+                let max_scroll_x = (f32::from(prepaint.content_width)
+                    - f32::from(bounds.size.width - px(GUTTER_WIDTH + GUTTER_PAD)))
+                    .max(0.0);
                 move |event: &MouseMoveEvent, _phase, window, _cx| {
                     let mut s = selection.get();
                     if !s.selecting { return; }
@@ -827,20 +833,36 @@ impl Element for DiffBlock {
                         changed = true;
                     }
 
-                    // Auto-scroll the parent container when dragging near edges
+                    // Horizontal auto-scroll within the diff block
+                    let edge = px(AUTO_SCROLL_EDGE);
+                    let speed = AUTO_SCROLL_SPEED;
+                    let mouse_x = event.position.x;
+                    if mouse_x > content_right - edge && max_scroll_x > 0.0 {
+                        let mut hs = h_scroll.get();
+                        hs.offset_x = (hs.offset_x + speed).min(max_scroll_x);
+                        hs.last_scroll_time = Some(Instant::now());
+                        h_scroll.set(hs);
+                        changed = true;
+                    } else if mouse_x < content_left + edge {
+                        let mut hs = h_scroll.get();
+                        hs.offset_x = (hs.offset_x - speed).max(0.0);
+                        hs.last_scroll_time = Some(Instant::now());
+                        h_scroll.set(hs);
+                        changed = true;
+                    }
+
+                    // Vertical auto-scroll in the parent container
                     if let Some(ref sh) = parent_scroll {
                         let scroll_bounds = sh.bounds();
-                        let edge = px(AUTO_SCROLL_EDGE);
-                        let speed = px(AUTO_SCROLL_SPEED);
                         let mouse_y = event.position.y;
                         if mouse_y < scroll_bounds.top() + edge {
                             let mut offset = sh.offset();
-                            offset.y = (offset.y + speed).min(px(0.0));
+                            offset.y = (offset.y + px(speed)).min(px(0.0));
                             sh.set_offset(offset);
                             changed = true;
                         } else if mouse_y > scroll_bounds.bottom() - edge {
                             let mut offset = sh.offset();
-                            offset.y -= speed;
+                            offset.y -= px(speed);
                             sh.set_offset(offset);
                             changed = true;
                         }
