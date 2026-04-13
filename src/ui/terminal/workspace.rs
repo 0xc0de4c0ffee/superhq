@@ -49,7 +49,7 @@ impl super::TerminalPanel {
             });
         } else {
             side_panel.update(cx, |sp, cx| {
-                sp.deactivate(cx);
+                sp.hide(cx);
             });
         }
     }

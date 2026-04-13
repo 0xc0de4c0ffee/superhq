@@ -165,6 +165,18 @@ impl SidePanel {
         cx.notify();
     }
 
+    /// Hide the panel without discarding accumulated diff state. Used when
+    /// switching to a tab that has no sandbox (host shell, booting tab) — the
+    /// panel should collapse but come back with the same changes when the
+    /// user returns to a sandboxed tab.
+    pub fn hide(&mut self, cx: &mut Context<Self>) {
+        if self.visible {
+            self.visible = false;
+            cx.emit(PanelEvent::Deactivate);
+            cx.notify();
+        }
+    }
+
     /// Start a background watcher for a specific sandbox. It accumulates
     /// changes in `sandbox_changes[key]` independently. If this sandbox is
     /// the active one, it also updates the visible `changes_tab`.
