@@ -677,7 +677,7 @@ impl super::TerminalPanel {
                                 setup_steps: None,
                                 setup_error: None,
                                 agent_color: None,
-                                icon_path: Some(SharedString::from("icons/agents/shell.svg")),
+                                icon_path: Some(SharedString::from("icons/terminal.svg")),
                                 kind: TabKind::Shell {
                                     parent_agent_tab_id,
                                     sandbox: sandbox_for_kind,
@@ -707,6 +707,102 @@ impl super::TerminalPanel {
             .ok();
         })
         .detach();
+    }
+
+    /// Open a host shell tab (local PTY, not sandboxed).
+    pub fn open_host_shell_tab(&mut self, cx: &mut Context<Self>) {
+        let ws_id = match self.active_workspace_id {
+            Some(id) => id,
+            None => return,
+        };
+
+        let tab_id = self.next_tab_id;
+        self.next_tab_id += 1;
+
+        // Create local PTY
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
+        let pty_system = portable_pty::native_pty_system();
+        let pair = match pty_system.openpty(portable_pty::PtySize {
+            rows: 24,
+            cols: 80,
+            pixel_width: 0,
+            pixel_height: 0,
+        }) {
+            Ok(pair) => pair,
+            Err(e) => {
+                eprintln!("Failed to open PTY: {e}");
+                return;
+            }
+        };
+
+        let mut cmd = portable_pty::CommandBuilder::new(&shell);
+        cmd.env("TERM", "xterm-256color");
+        cmd.env("COLORTERM", "truecolor");
+
+        // Start in the workspace's mount path if available
+        let mount_path = self.sessions.get(&ws_id)
+            .and_then(|s| s.read(cx).mount_path.clone());
+        if let Some(ref path) = mount_path {
+            cmd.cwd(path);
+        }
+
+        if let Err(e) = pair.slave.spawn_command(cmd) {
+            eprintln!("Failed to spawn shell: {e}");
+            return;
+        }
+
+        let writer = match pair.master.take_writer() {
+            Ok(w) => w,
+            Err(e) => { eprintln!("Failed to get PTY writer: {e}"); return; }
+        };
+        let reader = match pair.master.try_clone_reader() {
+            Ok(r) => r,
+            Err(e) => { eprintln!("Failed to get PTY reader: {e}"); return; }
+        };
+
+        let pty_master = std::sync::Arc::new(parking_lot::Mutex::new(pair.master));
+        drop(pair.slave);
+
+        let terminal_config = Self::make_terminal_config();
+        let pty_for_resize = pty_master.clone();
+        let resize_callback = move |cols: usize, rows: usize| {
+            let _ = pty_for_resize.lock().resize(portable_pty::PtySize {
+                cols: cols as u16,
+                rows: rows as u16,
+                pixel_width: 0,
+                pixel_height: 0,
+            });
+        };
+
+        if let Some(session) = self.sessions.get(&ws_id) {
+            let terminal = cx.new(|cx| {
+                TerminalView::new(writer, reader, terminal_config, cx)
+                    .with_resize_callback(resize_callback)
+            });
+
+            let tab = TerminalTab {
+                tab_id,
+                label: SharedString::from("Host Terminal"),
+                terminal: Some(terminal),
+                setup_steps: None,
+                setup_error: None,
+                agent_color: Some(crate::ui::theme::text_muted()),
+                icon_path: Some(SharedString::from("icons/host-terminal.svg")),
+                kind: TabKind::HostShell { pty_master },
+                agent_status: AgentStatus::Unknown,
+                event_service: None,
+                checkpointing: false,
+                checkpoint_name: None,
+                tab_db_id: None,
+            };
+
+            session.update(cx, |s, cx| {
+                s.add_tab(tab, cx);
+                s.tab_scroll.scroll_to_item(s.tabs.len() - 1);
+            });
+
+            cx.notify();
+        }
     }
 
 }

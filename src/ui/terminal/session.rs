@@ -86,6 +86,10 @@ pub enum TabKind {
         parent_agent_tab_id: u64,
         sandbox: Arc<AsyncSandbox>,
     },
+    HostShell {
+        #[allow(dead_code)]
+        pty_master: Arc<parking_lot::Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
+    },
 }
 
 pub struct TerminalTab {

@@ -228,7 +228,7 @@ impl Render for TerminalPanel {
 
                     // Count selectable items for keyboard nav
                     let shell_count = if running_agents.is_empty() { 0 } else { running_agents.len() };
-                    let total_items = shell_count + agents.len();
+                    let total_items = shell_count + 1 + agents.len(); // +1 for host shell
                     let focused_idx = self.agent_menu_index.min(total_items.saturating_sub(1));
 
                     let mut menu = t::popover()
@@ -273,7 +273,7 @@ impl Render for TerminalPanel {
                     // Shell items
                     if running_agents.is_empty() {
                         menu = menu.child(self.render_menu_item(
-                            "menu-shell-disabled", "Shell", Some("icons/agents/shell.svg"),
+                            "menu-shell-disabled", "Shell", Some("icons/terminal.svg"),
                             None, false, false, cx, |_, _| {},
                         ));
                     } else if running_agents.len() == 1 {
@@ -282,7 +282,7 @@ impl Render for TerminalPanel {
                         menu = menu.child(self.render_menu_item(
                             "menu-shell",
                             &format!("Shell ({})", running_agents[0].name),
-                            Some("icons/agents/shell.svg"),
+                            Some("icons/terminal.svg"),
                             None, true, focused, cx,
                             move |this, cx| { this.open_shell_tab(agent_tab_id, cx); },
                         ));
@@ -294,12 +294,26 @@ impl Render for TerminalPanel {
                             menu = menu.child(self.render_menu_item(
                                 SharedString::from(format!("menu-shell-{}", i)),
                                 &format!("Shell ({})", info.name),
-                                Some("icons/agents/shell.svg"),
+                                Some("icons/terminal.svg"),
                                 None, true, focused, cx,
                                 move |this, cx| { this.open_shell_tab(agent_tab_id, cx); },
                             ));
                             item_idx += 1;
                         }
+                    }
+
+                    // Host shell — always available
+                    {
+                        let focused = item_idx == focused_idx;
+                        menu = menu.child(self.render_menu_item(
+                            "menu-host-shell",
+                            "Host Terminal",
+                            Some("icons/host-terminal.svg"),
+                            Some(t::text_muted()),
+                            true, focused, cx,
+                            move |this, cx| { this.open_host_shell_tab(cx); },
+                        ));
+                        item_idx += 1;
                     }
 
                     menu = menu.child(div().h(px(1.0)).mx_1p5().my_0p5().bg(t::border_subtle()));

@@ -261,8 +261,11 @@ impl super::TerminalPanel {
         if idx < shell_count {
             let tab_id = running_agents[idx].tab_id;
             self.open_shell_tab(tab_id, cx);
+        } else if idx == shell_count {
+            // Host shell
+            self.open_host_shell_tab(cx);
         } else {
-            let agent_idx = idx - shell_count;
+            let agent_idx = idx - shell_count - 1;
             if let Some(a) = self.agents.get(agent_idx).cloned() {
                 let color = a.color.as_ref().and_then(|c| t::parse_hex_color(c));
                 let icon = a.icon.clone().map(SharedString::from);
