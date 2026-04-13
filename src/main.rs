@@ -496,8 +496,6 @@ impl Render for AppView {
                             .w(self.sidebar_size)
                             .flex_shrink_0()
                             .bg(t::bg_surface())
-                            .border_r_1()
-                            .border_color(t::border())
                             .flex()
                             .flex_col()
                             .child(
@@ -515,15 +513,14 @@ impl Render for AppView {
                             .cursor(CursorStyle::ResizeLeftRight)
                             .flex()
                             .justify_center()
-                            .group("sidebar-resize-group")
                             .on_drag(PanelResize::Sidebar, |_, _, _, cx| {
                                 cx.new(|_| ResizeDragView)
                             })
                             .child(
                                 div()
-                                    .w(px(2.0))
+                                    .w(px(1.0))
                                     .h_full()
-                                    .group_hover("sidebar-resize-group", |s| s.bg(t::accent())),
+                                    .bg(t::border()),
                             ),
                     ))
                     // Center terminal
@@ -547,15 +544,14 @@ impl Render for AppView {
                                 .cursor(CursorStyle::ResizeLeftRight)
                                 .flex()
                                 .justify_center()
-                                .group("dock-resize-group")
                                 .on_drag(PanelResize::RightDock, |_, _, _, cx| {
                                     cx.new(|_| ResizeDragView)
                                 })
                                 .child(
                                     div()
-                                        .w(px(2.0))
+                                        .w(px(1.0))
                                         .h_full()
-                                        .group_hover("dock-resize-group", |s| s.bg(t::accent())),
+                                        .bg(t::border()),
                                 ),
                         )
                         .child(
@@ -564,8 +560,6 @@ impl Render for AppView {
                                 .h_full()
                                 .flex_shrink_0()
                                 .bg(t::bg_surface())
-                                .border_l_1()
-                                .border_color(t::border())
                                 .child(self.right_dock.clone()),
                         )
                     })
@@ -672,16 +666,13 @@ fn main() -> Result<()> {
                                 "7" => Some(6), "8" => Some(7), "9" => Some(8),
                                 _ => None,
                             } {
+                                let prev = terminal.read(cx).active_workspace_id;
                                 sidebar.update(cx, |v, cx| {
                                     v.activate_by_index(n, window, cx);
-                                    v.set_show_badges(false, cx);
                                 });
-                                // Show workspace name in toast
-                                show_workspace_toast(cx);
-                                app_view.update(cx, |this, _cx| {
-                                    this.cmd_held = false;
-                                    this.focus_handle.focus(window);
-                                });
+                                if terminal.read(cx).active_workspace_id != prev {
+                                    show_workspace_toast(cx);
+                                }
                                 cx.stop_propagation();
                             }
                         }
@@ -733,16 +724,18 @@ fn main() -> Result<()> {
                         if m.platform && m.control && !m.alt {
                             match key {
                                 "}" | "]" => {
+                                    let prev = terminal.read(cx).active_workspace_id;
                                     sidebar.update(cx, |v, cx| v.next_workspace(window, cx));
-                                    if let Some(name) = terminal.read(cx).active_workspace_name(cx) {
-                                        toast.update(cx, |t, cx| t.show(format!("Switched to {name}"), cx));
+                                    if terminal.read(cx).active_workspace_id != prev {
+                                        show_workspace_toast(cx);
                                     }
                                     cx.stop_propagation();
                                 }
                                 "{" | "[" => {
+                                    let prev = terminal.read(cx).active_workspace_id;
                                     sidebar.update(cx, |v, cx| v.prev_workspace(window, cx));
-                                    if let Some(name) = terminal.read(cx).active_workspace_name(cx) {
-                                        toast.update(cx, |t, cx| t.show(format!("Switched to {name}"), cx));
+                                    if terminal.read(cx).active_workspace_id != prev {
+                                        show_workspace_toast(cx);
                                     }
                                     cx.stop_propagation();
                                 }

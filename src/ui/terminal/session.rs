@@ -164,6 +164,7 @@ impl WorkspaceSession {
 
     pub fn activate_tab(&mut self, index: usize, cx: &mut Context<Self>) {
         if index >= self.tabs.len() { return; }
+        if index == self.active_tab { return; }
         self.active_tab = index;
         if let Some(tab) = self.tabs.get(index) {
             cx.emit(SessionEvent::TabActivated { tab_id: tab.tab_id });
