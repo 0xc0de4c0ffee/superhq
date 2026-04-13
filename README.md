@@ -99,6 +99,16 @@ cargo build --release
 - **SQLite** — workspace config, secrets (AES-256-GCM encrypted), port mappings
 - **Auth gateway** — reverse proxy that injects API credentials without exposing them to sandboxes
 
+## Star History
+
+<a href="https://www.star-history.com/?repos=superhq-ai%2Fsuperhq&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=superhq-ai/superhq&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=superhq-ai/superhq&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=superhq-ai/superhq&type=date&legend=top-left" />
+ </picture>
+</a>
+
 ## License
 
 [GNU Affero General Public License v3.0](LICENSE)
