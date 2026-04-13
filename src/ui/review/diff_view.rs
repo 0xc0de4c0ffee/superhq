@@ -787,7 +787,8 @@ impl Element for DiffBlock {
                 (line, col)
             };
 
-            // MouseDown: start selection
+            // MouseDown: start selection (skip scrollbar area)
+            let scrollbar_top = bounds.origin.y + bounds.size.height - px(SCROLLBAR_TRACK_HEIGHT);
             window.on_mouse_event({
                 let selection = selection.clone();
                 let hitbox_id = prepaint.hitbox.id;
@@ -797,6 +798,7 @@ impl Element for DiffBlock {
                     if !phase.bubble() { return; }
                     if event.button != MouseButton::Left { return; }
                     if !hitbox_id.is_hovered(window) { return; }
+                    if event.position.y >= scrollbar_top { return; }
                     focus.focus(window);
                     let (line, col) = pos_to_lc(event.position);
                     let mut s = selection.get();
@@ -1108,28 +1110,33 @@ fn render_header(
                 .flex_shrink_0()
                 .text_color(t::text_ghost()),
         )
-        .child(
-            div().text_xs().font_weight(FontWeight::MEDIUM)
-                .text_color(name_color).flex_shrink_0()
-                .child(SharedString::from(filename.to_string())),
-        );
-
-    if let Some(dir) = dir {
-        h = h.child(
-            div().text_xs().text_color(t::text_dim()).flex_shrink_0()
-                .child(SharedString::from(dir.to_string())),
-        );
-    }
-
-    if status == FileStatus::Added {
-        h = h.child(
-            div().text_xs().px(px(5.0)).py(px(1.0)).rounded(px(3.0))
-                .bg(t::diff_add_bg()).text_color(t::diff_add_text())
-                .flex_shrink_0().child("New"),
-        );
-    }
-
-    h = h.child(div().flex_grow());
+        .child({
+            let mut name_row = div()
+                .flex().items_center().gap_1p5()
+                .min_w_0()
+                .overflow_hidden()
+                .child(
+                    div().text_xs().font_weight(FontWeight::MEDIUM)
+                        .text_color(name_color)
+                        .overflow_hidden().text_ellipsis().whitespace_nowrap()
+                        .child(SharedString::from(filename.to_string())),
+                );
+            if let Some(dir) = dir {
+                name_row = name_row.child(
+                    div().text_xs().text_color(t::text_dim()).flex_shrink_0()
+                        .child(SharedString::from(dir.to_string())),
+                );
+            }
+            if status == FileStatus::Added {
+                name_row = name_row.child(
+                    div().text_xs().px(px(5.0)).py(px(1.0)).rounded(px(3.0))
+                        .bg(t::diff_add_bg()).text_color(t::diff_add_text())
+                        .flex_shrink_0().child("New"),
+                );
+            }
+            name_row
+        })
+        .child(div().flex_grow());
 
     if stats.additions > 0 {
         h = h.child(div().text_xs().text_color(t::diff_add_text()).flex_shrink_0()
