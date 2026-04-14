@@ -20,6 +20,8 @@ pub fn config() -> AgentConfig {
                         url: "https://github.com/openai/codex/releases/latest/download/codex-aarch64-unknown-linux-musl.tar.gz",
                         path: "/usr/local/bin",
                         extract: true,
+                        // Flat tarball — binary sits at the archive root.
+                        strip_components: 0,
                         skip_if: None,
                     },
                     InstallStep::Rename {

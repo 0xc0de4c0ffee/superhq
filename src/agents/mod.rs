@@ -41,6 +41,11 @@ pub enum InstallStep {
         path: &'static str,
         /// If true, treat as .tar.gz and extract to `path`.
         extract: bool,
+        /// When extracting, strip N leading path components. Mirrors
+        /// `tar --strip-components=N`. Use `1` for tarballs wrapped in a
+        /// single top-level directory (e.g. `node-v22…/bin/node`), `0`
+        /// for flat tarballs (a single binary at the archive root).
+        strip_components: u32,
         /// If this command succeeds (exit 0), skip this step.
         skip_if: Option<&'static str>,
     },
@@ -108,6 +113,8 @@ const NODE_INSTALL_STEP: InstallStep = InstallStep::Download {
     url: "https://nodejs.org/dist/v22.16.0/node-v22.16.0-linux-arm64.tar.gz",
     path: "/usr/local",
     extract: true,
+    // Strip `node-v22.16.0-linux-arm64/` so contents land in /usr/local/{bin,lib,…}.
+    strip_components: 1,
     skip_if: Some("/usr/local/bin/node --version"),
 };
 

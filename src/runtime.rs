@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// The shuru release version we need. Must match a published GitHub release.
-const SHURU_VERSION: &str = "0.5.8";
+const SHURU_VERSION: &str = "0.5.9";
 
 /// Expected files inside the tar.gz.
 const REQUIRED_FILES: &[&str] = &["Image", "rootfs.ext4", "initramfs.cpio.gz"];

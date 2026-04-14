@@ -138,13 +138,14 @@ impl super::TerminalPanel {
                                             _ => Ok(()),
                                         }
                                     }
-                                    agents::InstallStep::Download { label: dl_label, url, path, extract, .. } => {
+                                    agents::InstallStep::Download { label: dl_label, url, path, extract, strip_components, .. } => {
                                         let sb = install_sb.clone();
                                         let url = url.to_string();
                                         let path = path.to_string();
                                         let extract = *extract;
+                                        let strip = *strip_components;
                                         let base_label = *dl_label;
-                                        match tokio_handle.spawn(async move { sb.download(&url, &path, extract).await }).await.unwrap() {
+                                        match tokio_handle.spawn(async move { sb.download(&url, &path, extract, strip).await }).await.unwrap() {
                                             Ok((mut reply_rx, progress_rx)) => {
                                                 loop {
                                                     let mut last_progress = None;
@@ -200,14 +201,15 @@ impl super::TerminalPanel {
                             }
                             group_result
                         }
-                        agents::InstallStep::Download { label, url, path, extract, .. } => {
+                        agents::InstallStep::Download { label, url, path, extract, strip_components, .. } => {
                             let sb = install_sb.clone();
                             let url = url.to_string();
                             let path = path.to_string();
                             let extract = *extract;
+                            let strip = *strip_components;
                             let base_label = *label;
                             match tokio_handle
-                                .spawn(async move { sb.download(&url, &path, extract).await })
+                                .spawn(async move { sb.download(&url, &path, extract, strip).await })
                                 .await
                                 .unwrap()
                             {

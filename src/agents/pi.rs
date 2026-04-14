@@ -20,6 +20,8 @@ pub fn config() -> AgentConfig {
                         url: "https://github.com/badlogic/pi-mono/releases/latest/download/pi-linux-arm64.tar.gz",
                         path: "/usr/local/bin",
                         extract: true,
+                        // Strip `pi/` so the binary lands at /usr/local/bin/pi.
+                        strip_components: 1,
                         skip_if: None,
                     },
                     InstallStep::Chmod {
