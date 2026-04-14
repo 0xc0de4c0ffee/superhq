@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.3
+
+- Appearance settings: theme picker with Light, Dark, Washi, Sumi, and Auto (follows system). Hot-swap — chrome, terminals, and scrollbars update in place without restart.
+- Terminal palette, scrollbar, and agent icons adopt the active theme. Pi icon inverts on light themes instead of disappearing into the background.
+- COLORFGBG hint passed to the guest and host shells so TUIs pick a matching light/dark palette.
+- Runtime download is reliable on re-install: tar.gz is downloaded to a temp file first, then extracted, instead of streaming through gzip+tar in one pass. Progress bar no longer freezes on the rootfs write.
+- Sandbox uses self-contained checkpoints (Direct mode) so a shuru version bump doesn't invalidate previously-saved workspaces.
+- Terminal view no longer slips under the Ports status bar.
+- Opening the Ports dialog while a terminal is still setting up no longer panics.
+- App icon now renders in release builds (was referencing the source tree's absolute path).
+
 ## 0.3.2
 
 - Review panel is a lot faster with many changed files. Each row is its own view, so hover no longer re-renders the full list every frame.
