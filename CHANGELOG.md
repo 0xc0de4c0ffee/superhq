@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.5
+
+- OpenRouter is now a built-in provider with bundled icon, default host, and Codex integration. Anthropic and OpenAI rows in the Providers settings also pick up their proper logos.
+- Each provider has its own enable/disable toggle. Disabled providers are treated as missing: the MITM proxy doesn't get configured for their hosts and they're not injected into the sandbox.
+- New focusable Switch component (Tab + Space/Enter), used both for per-provider toggles and the General → Auto-launch agent setting.
+- Providers tab restructured: switch on the title row, status indicator and Remove in a footer row, OpenAI gets a clarifying note about OAuth vs API key.
+- Provider decision logic extracted into a pure resolver (`provider_resolve`) backed by unit tests, so disabled / required / one-of-group / gateway-handled rules live in one place.
+- Text input fixes:
+  - Long values no longer paint past the input bounds.
+  - Caret stays visible while typing past the right edge.
+  - Mouse wheel / trackpad horizontal scroll.
+  - Drag-select past the input edge keeps extending the selection (auto-scrolls toward the cursor even when held still).
+  - Double-click selects a word, triple-click selects all.
+  - Click hit-testing fixed when the input is masked.
+
 ## 0.3.4
 
 - Codex installer works again. Matches shuru 0.5.9 which drops the guest's silent-first-component stripping in favor of an explicit `strip_components` per download. Flat tarballs (Codex) and directory-wrapped ones (Node, Pi) now extract correctly.
