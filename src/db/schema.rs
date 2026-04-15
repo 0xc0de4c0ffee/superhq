@@ -217,6 +217,7 @@ pub struct Secret {
     pub hosts: Vec<String>,
     pub auth_method: String,
     pub oauth_expires_at: Option<String>,
+    pub enabled: bool,
 }
 
 /// A terminal tab within a workspace (DB row).

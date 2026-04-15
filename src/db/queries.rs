@@ -480,7 +480,7 @@ impl Database {
     pub fn list_secrets(&self) -> Result<Vec<Secret>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, env_var, label, hosts, auth_method, oauth_expires_at
+            "SELECT id, env_var, label, hosts, auth_method, oauth_expires_at, enabled
              FROM secrets ORDER BY env_var ASC",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -495,9 +495,21 @@ impl Database {
                 hosts,
                 auth_method: row.get::<_, String>(4).unwrap_or_else(|_| "api_key".into()),
                 oauth_expires_at: row.get(5)?,
+                enabled: row.get::<_, bool>(6).unwrap_or(true),
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Enable or disable a saved secret without removing it.
+    pub fn set_secret_enabled(&self, env_var: &str, enabled: bool) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE secrets SET enabled = ?1, updated_at = datetime('now')
+             WHERE env_var = ?2",
+            rusqlite::params![enabled, env_var],
+        )?;
+        Ok(())
     }
 
     /// Get the host patterns for a secret.

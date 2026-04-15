@@ -23,6 +23,7 @@ struct ProviderMeta {
     agents: &'static str,
     icon: Option<&'static str>,
     oauth: bool,
+    note: Option<&'static str>,
 }
 
 const PROVIDERS: &[ProviderMeta] = &[
@@ -32,6 +33,7 @@ const PROVIDERS: &[ProviderMeta] = &[
         agents: "Claude Code, Pi",
         icon: Some("icons/providers/anthropic.svg"),
         oauth: false,
+        note: None,
     },
     ProviderMeta {
         env_var: "OPENAI_API_KEY",
@@ -39,6 +41,7 @@ const PROVIDERS: &[ProviderMeta] = &[
         agents: "Codex, Pi",
         icon: Some("icons/providers/openai.svg"),
         oauth: true,
+        note: Some("Sign in with your ChatGPT account, or paste an API key. Only one can be active at a time."),
     },
     ProviderMeta {
         env_var: "OPENROUTER_API_KEY",
@@ -46,6 +49,7 @@ const PROVIDERS: &[ProviderMeta] = &[
         agents: "Codex",
         icon: Some("icons/providers/openrouter.svg"),
         oauth: false,
+        note: None,
     },
 ];
 
@@ -65,6 +69,10 @@ fn supports_oauth(env_var: &str) -> bool {
 
 pub(crate) fn provider_icon(env_var: &str) -> Option<&'static str> {
     provider_meta(env_var).and_then(|p| p.icon)
+}
+
+pub(crate) fn provider_note(env_var: &str) -> Option<&'static str> {
+    provider_meta(env_var).and_then(|p| p.note)
 }
 
 // ── Settings nav tabs ────────────────────────────────────────────
@@ -121,7 +129,8 @@ pub(crate) struct SecretRow {
     pub description: String,
     pub input: Entity<TextInput>,
     pub has_saved_value: bool,
-    pub auth_method: String,
+    pub auth_method: crate::sandbox::provider_resolve::AuthMethod,
+    pub enabled_switch: Entity<crate::ui::components::Switch>,
 }
 
 // ── Sandbox defaults (read from DB) ──────────────────────────────
@@ -138,9 +147,9 @@ pub struct SettingsPanel {
     pub(crate) db: Arc<Database>,
     pub(crate) active_tab: SettingsTab,
     pub(crate) default_agent_id: Option<i64>,
-    pub(crate) auto_launch_agent: bool,
     pub(crate) theme_id: String,
     agent_dropdown: Entity<crate::ui::components::Select>,
+    pub(crate) auto_launch_switch: Entity<crate::ui::components::Switch>,
     pub(crate) secret_rows: Vec<SecretRow>,
     pub(crate) sandbox_inputs: SandboxInputs,
     pub(crate) oauth_status: OAuthStatus,
@@ -172,7 +181,9 @@ impl SettingsPanel {
 
         let oauth_status = existing_secrets
             .iter()
-            .find(|s| s.env_var == "OPENAI_API_KEY" && s.auth_method == "oauth")
+            .find(|s| s.env_var == "OPENAI_API_KEY"
+                && crate::sandbox::provider_resolve::AuthMethod::from_str(&s.auth_method)
+                    == crate::sandbox::provider_resolve::AuthMethod::OAuth)
             .map(|_| OAuthStatus::Connected {
                 email: "OpenAI account".into(),
                 plan: String::new(),
@@ -185,12 +196,12 @@ impl SettingsPanel {
                 let (lbl, desc) = secret_display_info(&env_var);
                 let label = lbl.to_string();
                 let description = desc.to_string();
-                let has_saved = db.has_secret(&env_var).unwrap_or(false);
-                let auth_method = existing_secrets
-                    .iter()
-                    .find(|s| s.env_var == env_var)
-                    .map(|s| s.auth_method.clone())
-                    .unwrap_or_else(|| "api_key".into());
+                let existing = existing_secrets.iter().find(|s| s.env_var == env_var);
+                let has_saved = existing.is_some();
+                let auth_method = existing
+                    .map(|s| crate::sandbox::provider_resolve::AuthMethod::from_str(&s.auth_method))
+                    .unwrap_or(crate::sandbox::provider_resolve::AuthMethod::ApiKey);
+                let enabled = existing.map(|s| s.enabled).unwrap_or(true);
                 let placeholder_label = label.clone();
                 let input = cx.new(|cx| {
                     let mut input = TextInput::new(cx);
@@ -198,6 +209,7 @@ impl SettingsPanel {
                     input.set_masked(true);
                     input
                 });
+                let enabled_switch = Self::init_secret_enabled_switch(env_var.clone(), enabled, cx);
                 SecretRow {
                     env_var,
                     label,
@@ -205,6 +217,7 @@ impl SettingsPanel {
                     input,
                     has_saved_value: has_saved,
                     auth_method,
+                    enabled_switch,
                 }
             })
             .collect();
@@ -235,6 +248,8 @@ impl SettingsPanel {
         let all_agents = db.list_agents().unwrap_or_default();
         let default_agent_id = settings.as_ref().and_then(|s| s.default_agent_id);
         let agent_dropdown = Self::init_agent_dropdown(&all_agents, default_agent_id, cx);
+        let auto_launch_value = settings.as_ref().map(|s| s.auto_launch_agent).unwrap_or(true);
+        let auto_launch_switch = Self::init_auto_launch_switch(auto_launch_value, cx);
         let focus_handle = cx.focus_handle();
         focus_handle.focus(window);
 
@@ -249,9 +264,9 @@ impl SettingsPanel {
             db,
             active_tab: SettingsTab::General,
             default_agent_id,
-            auto_launch_agent: settings.as_ref().map(|s| s.auto_launch_agent).unwrap_or(true),
             theme_id,
             agent_dropdown,
+            auto_launch_switch,
             secret_rows,
             sandbox_inputs,
             toast,

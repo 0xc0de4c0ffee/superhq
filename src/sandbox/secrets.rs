@@ -1,6 +1,7 @@
 use crate::db::RequiredSecretEntry;
 use crate::db::Database;
 use crate::oauth;
+use crate::sandbox::provider_resolve::{agent_need, load_provider_states, resolve};
 use anyhow::Result;
 use shuru_sdk::SecretConfig;
 use std::collections::{HashMap, HashSet};
@@ -22,22 +23,23 @@ pub fn default_hosts(env_var: &str) -> Vec<String> {
 }
 
 /// Check which required secrets are missing from the vault.
+/// A secret that's saved but disabled in settings counts as missing — the user
+/// has explicitly opted out of it for this provider.
 pub fn check_missing(db: &Database, required: &[RequiredSecretEntry]) -> Vec<RequiredSecretEntry> {
-    // Required secrets: all must be present
+    let states = load_provider_states(db, required);
+    let no_gateway = HashSet::new();
+    let need = agent_need(required, &no_gateway);
+    let r = resolve(&states, &need);
+
+    let missing_set: HashSet<&str> = r.missing_required.iter().map(|s| s.as_str()).collect();
     let mut missing: Vec<RequiredSecretEntry> = required
         .iter()
-        .filter(|e| !e.is_optional() && !db.has_secret(e.env_var()).unwrap_or(false))
+        .filter(|e| missing_set.contains(e.env_var()))
         .cloned()
         .collect();
 
-    // Optional secrets: at least one must be present (if any exist)
-    let optional: Vec<&RequiredSecretEntry> = required.iter().filter(|e| e.is_optional()).collect();
-    if !optional.is_empty() {
-        let has_any = optional.iter().any(|e| db.has_secret(e.env_var()).unwrap_or(false));
-        if !has_any {
-            // Report all optional secrets as missing so user can pick one
-            missing.extend(optional.iter().map(|e| (*e).clone()));
-        }
+    if r.missing_one_of {
+        missing.extend(required.iter().filter(|e| e.is_optional()).cloned());
     }
 
     missing
@@ -58,35 +60,34 @@ pub fn build_secrets_map(
     required: &[RequiredSecretEntry],
     gateway_env_vars: &HashSet<&str>,
 ) -> Result<ResolvedSecrets> {
-    let mut secrets = HashMap::new();
+    let states = load_provider_states(db, required);
+    let need = agent_need(required, gateway_env_vars);
+    let inject = resolve(&states, &need).inject;
+    let entries_by_env: HashMap<&str, &RequiredSecretEntry> =
+        required.iter().map(|e| (e.env_var(), e)).collect();
 
-    for entry in required {
-        let env_var: &str = entry.env_var();
+    let mut secrets = HashMap::new();
+    for env_var in inject {
+        let Some(entry) = entries_by_env.get(env_var.as_str()) else { continue };
         let full = entry.as_full();
 
-        // Skip secrets handled by the auth gateway — no MITM proxy or OAuth
-        // token injection needed. The gateway looks up credentials directly.
-        if gateway_env_vars.contains(env_var) {
-            continue;
-        }
-
-        if let Some(value) = db.get_secret_value(env_var)? {
+        if let Some(value) = db.get_secret_value(&env_var)? {
             // Resolve hosts: RequiredSecret.hosts > DB hosts > default_hosts
             let hosts: Vec<String> = if let Some(h) = full.hosts {
                 h
             } else {
-                let db_hosts = db.get_secret_hosts(env_var)?;
+                let db_hosts = db.get_secret_hosts(&env_var)?;
                 if db_hosts.is_empty() {
-                    default_hosts(env_var)
+                    default_hosts(&env_var)
                 } else {
                     db_hosts
                 }
             };
 
             secrets.insert(
-                env_var.to_string(),
+                env_var.clone(),
                 SecretConfig {
-                    from: env_var.to_string(),
+                    from: env_var,
                     hosts,
                     value: Some(value),
                 },

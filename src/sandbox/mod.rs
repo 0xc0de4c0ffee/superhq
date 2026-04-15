@@ -8,6 +8,7 @@ pub mod config;
 pub mod git;
 #[allow(dead_code)]
 pub mod manager;
+pub mod provider_resolve;
 pub mod pty_adapter;
 pub mod secrets;
 pub mod service;

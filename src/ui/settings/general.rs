@@ -2,6 +2,7 @@ use gpui::*;
 use super::SettingsPanel;
 use super::card::*;
 use crate::ui::components::select::{Select, SelectItem, SelectEvent};
+use crate::ui::components::switch::{Switch, SwitchEvent};
 
 impl SettingsPanel {
     pub(super) fn init_agent_dropdown(
@@ -33,8 +34,36 @@ impl SettingsPanel {
         state
     }
 
-    pub(super) fn render_general_tab(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let auto_launch = self.auto_launch_agent;
+    /// Generic helper: build a `Switch` and forward its changes to a callback.
+    pub(super) fn init_switch<F>(
+        value: bool,
+        on_change: F,
+        cx: &mut Context<Self>,
+    ) -> Entity<Switch>
+    where
+        F: Fn(&mut Self, bool, &mut Context<Self>) + 'static,
+    {
+        let state = cx.new(|cx| Switch::new(value, cx));
+        cx.subscribe(&state, move |this, _, event: &SwitchEvent, cx| {
+            let SwitchEvent::Change(value) = *event;
+            on_change(this, value, cx);
+        })
+        .detach();
+        state
+    }
+
+    pub(super) fn init_auto_launch_switch(
+        value: bool,
+        cx: &mut Context<Self>,
+    ) -> Entity<Switch> {
+        Self::init_switch(value, |this, value, _cx| {
+            if let Err(e) = this.db.update_auto_launch_agent(value) {
+                eprintln!("Failed to save auto_launch_agent: {e}");
+            }
+        }, cx)
+    }
+
+    pub(super) fn render_general_tab(&self, _cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .flex()
             .flex_col()
@@ -51,25 +80,7 @@ impl SettingsPanel {
                 settings_row(
                     "Auto-launch agent",
                     "Automatically start the default agent when opening a workspace",
-                    div()
-                        .id("auto-launch-toggle")
-                        .px_2()
-                        .py(px(3.0))
-                        .rounded(px(4.0))
-                        .cursor_pointer()
-                        .text_xs()
-                        .text_color(if auto_launch {
-                            crate::ui::theme::text_secondary()
-                        } else {
-                            crate::ui::theme::text_ghost()
-                        })
-                        .hover(|s| s.bg(crate::ui::theme::bg_hover()))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.auto_launch_agent = !this.auto_launch_agent;
-                            let _ = this.db.update_auto_launch_agent(this.auto_launch_agent);
-                            cx.notify();
-                        }))
-                        .child(if auto_launch { "On" } else { "Off" }),
+                    self.auto_launch_switch.clone(),
                 )
                 .into_any_element(),
             ]))

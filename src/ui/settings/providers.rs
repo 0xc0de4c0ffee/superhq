@@ -2,13 +2,30 @@ use gpui::*;
 use gpui::prelude::FluentBuilder as _;
 use crate::ui::theme as t;
 use crate::sandbox::secrets;
-use super::{SettingsPanel, OAuthStatus, supports_oauth, provider_icon};
+use crate::sandbox::provider_resolve::AuthMethod;
+use crate::ui::components::switch::Switch;
+use super::{SettingsPanel, OAuthStatus, supports_oauth, provider_icon, provider_note};
 use super::card::*;
 
 const PROVIDER_ICON_SIZE: f32 = 13.0;
 const PROVIDER_ICON_GAP: f32 = 8.0;
 
 impl SettingsPanel {
+    pub(super) fn init_secret_enabled_switch(
+        env_var: String,
+        enabled: bool,
+        cx: &mut Context<Self>,
+    ) -> Entity<Switch> {
+        Self::init_switch(enabled, move |this, value, cx| {
+            if let Err(e) = this.db.set_secret_enabled(&env_var, value) {
+                eprintln!("Failed to update secret enabled: {e}");
+                return;
+            }
+            // Re-render the panel so the row's status label reflects the new state.
+            cx.notify();
+        }, cx)
+    }
+
     pub(super) fn save_secret(&mut self, index: usize, cx: &mut Context<Self>) {
         let row = &self.secret_rows[index];
         let value = row.input.read(cx).value().to_string();
@@ -23,10 +40,12 @@ impl SettingsPanel {
         }
         let row = &mut self.secret_rows[index];
         row.has_saved_value = true;
-        row.auth_method = "api_key".into();
+        row.auth_method = AuthMethod::ApiKey;
+        let switch = row.enabled_switch.clone();
         if row.env_var == "OPENAI_API_KEY" {
             self.oauth_status = OAuthStatus::Idle;
         }
+        switch.update(cx, |s, cx| s.set_value(true, cx));
         self.toast.update(cx, |t, cx| t.show(format!("{label} key saved"), cx));
         cx.notify();
     }
@@ -41,7 +60,8 @@ impl SettingsPanel {
         }
         let row = &mut self.secret_rows[index];
         row.has_saved_value = false;
-        row.auth_method = "api_key".into();
+        row.auth_method = AuthMethod::ApiKey;
+        let switch = row.enabled_switch.clone();
         row.input.update(cx, |state, cx| {
             state.set_masked(false);
             state.set_value("", cx);
@@ -49,6 +69,7 @@ impl SettingsPanel {
         if env_var == "OPENAI_API_KEY" {
             self.oauth_status = OAuthStatus::Idle;
         }
+        switch.update(cx, |s, cx| s.set_value(true, cx));
         self.toast.update(cx, |t, cx| t.show(format!("{label} key removed"), cx));
         cx.notify();
     }
@@ -90,7 +111,7 @@ impl SettingsPanel {
                                         .find(|r| r.env_var == "OPENAI_API_KEY")
                                     {
                                         row.has_saved_value = true;
-                                        row.auth_method = "oauth".into();
+                                        row.auth_method = AuthMethod::OAuth;
                                     }
                                 }
                                 Err(e) => {
@@ -299,13 +320,35 @@ impl SettingsPanel {
         for i in 0..row_count {
             let row = &self.secret_rows[i];
             let has_saved = row.has_saved_value;
-            let is_oauth = row.auth_method == "oauth";
+            let enabled = row.enabled_switch.read(cx).value();
+            let is_oauth = row.auth_method == AuthMethod::OAuth;
             let has_oauth_option = supports_oauth(&row.env_var);
 
-            let status = div()
+            let (dot_color, label_color, status_label) = if !has_saved {
+                (t::status_dim(), t::text_faint(), "Not set")
+            } else if !enabled {
+                (t::status_dim(), t::text_faint(), "Disabled")
+            } else if is_oauth {
+                (t::status_green_dim(), t::status_green_dim(), "OAuth")
+            } else {
+                (t::status_green_dim(), t::status_green_dim(), "Configured")
+            };
+
+            let icon_path = provider_icon(&row.env_var);
+            let note = provider_note(&row.env_var);
+            let text_indent = if icon_path.is_some() {
+                px(PROVIDER_ICON_SIZE + PROVIDER_ICON_GAP)
+            } else {
+                px(0.0)
+            };
+
+            // Footer row: status indicator on the left, optional Remove on the right.
+            // Indented to align under the title text.
+            let footer = div()
                 .flex()
                 .items_center()
-                .gap(px(8.0))
+                .justify_between()
+                .pl(text_indent)
                 .child(
                     div()
                         .flex()
@@ -316,55 +359,51 @@ impl SettingsPanel {
                                 .w(px(5.0))
                                 .h(px(5.0))
                                 .rounded_full()
-                                .bg(if has_saved {
-                                    t::status_green_dim()
-                                } else {
-                                    t::status_dim()
-                                }),
+                                .bg(dot_color),
                         )
                         .child(
                             div()
                                 .text_xs()
-                                .text_color(if has_saved {
-                                    t::status_green_dim()
-                                } else {
-                                    t::text_faint()
-                                })
-                                .child(if has_saved {
-                                    if is_oauth { "OAuth" } else { "Configured" }
-                                } else {
-                                    "Not set"
-                                }),
+                                .text_color(label_color)
+                                .child(status_label),
                         ),
                 )
                 .when(!is_oauth && has_saved, |el: Div| {
                     el.child(
-                            t::button_danger("Remove")
+                        div()
                             .id(SharedString::from(format!("remove-secret-{i}")))
-                            .hover(|s: StyleRefinement| s.bg(t::error_bg()))
+                            .px_2()
+                            .py(px(3.0))
+                            .rounded(px(4.0))
+                            .cursor_pointer()
+                            .text_xs()
+                            .text_color(t::text_ghost())
+                            .hover(|s| s.bg(t::error_bg()).text_color(t::error_text()))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.remove_secret(i, window, cx);
-                            })),
+                            }))
+                            .child("Remove"),
                     )
                 });
-
-            let icon_path = provider_icon(&row.env_var);
 
             let mut row_el = div()
                 .px_4()
                 .py_3()
                 .flex()
                 .flex_col()
-                .gap(px(6.0))
+                .gap(px(8.0))
                 .child(
+                    // Title row: icon + name on the left, switch on the far right.
                     div()
                         .flex()
                         .items_center()
-                        .justify_between()
+                        .gap(px(12.0))
                         .child(
                             div()
                                 .flex()
                                 .flex_col()
+                                .flex_grow()
+                                .min_w(px(0.0))
                                 .gap(px(2.0))
                                 .child(
                                     div()
@@ -391,14 +430,23 @@ impl SettingsPanel {
                                     div()
                                         .text_xs()
                                         .text_color(t::text_ghost())
-                                        .when(icon_path.is_some(), |el| {
-                                            el.pl(px(PROVIDER_ICON_SIZE + PROVIDER_ICON_GAP))
-                                        })
+                                        .pl(text_indent)
                                         .child(format!("{} \u{00b7} {}", row.env_var, row.description)),
-                                ),
+                                )
+                                .when_some(note, |el, n| {
+                                    el.child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(t::text_faint())
+                                            .pl(text_indent)
+                                            .pt(px(2.0))
+                                            .child(n),
+                                    )
+                                }),
                         )
-                        .child(status),
-                );
+                        .when(has_saved, |el| el.child(row.enabled_switch.clone())),
+                )
+                .child(footer);
 
             if !is_oauth && !has_saved {
                 row_el = row_el.child(

@@ -123,7 +123,7 @@ impl Render for Button {
             .gap(px(6.0))
             .text_color(text_color)
             .border_1()
-            .border_color(if focused { t::border_focus() } else { t::transparent() });
+            .border_color(t::focus_ring(focused));
 
         if let Some(bg) = bg {
             el = el.bg(bg);

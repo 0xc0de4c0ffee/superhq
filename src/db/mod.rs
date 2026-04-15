@@ -86,6 +86,12 @@ impl Database {
             conn.execute("INSERT OR REPLACE INTO _migrations (version) VALUES (2)", [])?;
         }
 
+        if current < 3 {
+            conn.execute_batch(include_str!("../../migrations/003_secret_enabled.sql"))
+                .ok(); // ignore if column already exists
+            conn.execute("INSERT OR REPLACE INTO _migrations (version) VALUES (3)", [])?;
+        }
+
         Ok(())
     }
 

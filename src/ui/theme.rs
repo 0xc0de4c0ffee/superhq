@@ -243,6 +243,12 @@ pub fn border_subtle() -> Rgba { current().border_subtle.0 }
 pub fn border_strong() -> Rgba { current().border_strong.0 }
 pub fn border_focus() -> Rgba { current().border_focus.0 }
 pub fn transparent() -> Rgba { current().transparent.0 }
+
+/// Border color for focus rings: focus accent when focused, invisible otherwise.
+/// Pair with `.border_1()` (or thicker) on the wrapper.
+pub fn focus_ring(focused: bool) -> Rgba {
+    if focused { border_focus() } else { transparent() }
+}
 pub fn accent() -> Rgba { current().accent.0 }
 pub fn selection_bg() -> Rgba { current().selection_bg.0 }
 
