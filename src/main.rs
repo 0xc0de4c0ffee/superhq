@@ -1,6 +1,8 @@
 mod agents;
 mod assets;
+mod avatar_cache;
 mod db;
+mod git;
 mod oauth;
 mod runtime;
 mod sandbox;
@@ -369,6 +371,7 @@ impl Render for AppView {
                             .flex_shrink_0()
                             .flex()
                             .items_center()
+                            .mt(px(1.0))
                             .child(
                                 div()
                                     .id("toggle-left-sidebar")
@@ -400,6 +403,7 @@ impl Render for AppView {
                             .flex_grow()
                             .flex()
                             .justify_center()
+                            .mt(px(1.0))
                             .child(
                                 div()
                                     .text_xs()
@@ -416,6 +420,7 @@ impl Render for AppView {
                             .justify_end()
                             .pr_1()
                             .gap(px(2.0))
+                            .mt(px(1.0))
                             // Dock toggle
                             .when(dock_is_active, |el| {
                                 el.child(

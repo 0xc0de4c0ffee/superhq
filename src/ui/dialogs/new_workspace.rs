@@ -83,7 +83,19 @@ impl NewWorkspaceDialog {
         let mount_path = self.path_picker.read(cx).value().map(|s| s.to_string());
         let is_git_repo = mount_path
             .as_ref()
-            .map_or(false, |p| std::path::Path::new(p).join(".git").exists());
+            .map_or(false, |p| crate::git::is_git_repo(std::path::Path::new(p)));
+
+        // Kick off a background GitHub-org avatar fetch if the repo's origin
+        // points at github.com. Fire-and-forget: if it fails we just skip the
+        // avatar in the sidebar.
+        if is_git_repo {
+            if let Some(owner) = mount_path
+                .as_ref()
+                .and_then(|p| crate::git::github_owner_for_repo(std::path::Path::new(p)))
+            {
+                crate::avatar_cache::prefetch(owner);
+            }
+        }
 
         let settings = self.db.get_settings().ok();
         let _id = self.db.create_workspace(CreateWorkspaceParams {

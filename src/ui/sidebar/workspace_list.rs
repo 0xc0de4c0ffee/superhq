@@ -5,8 +5,10 @@ use crate::ui::terminal::TerminalPanel;
 use crate::ui::theme as t;
 use gpui::*;
 use gpui::prelude::FluentBuilder as _;
+use std::path::PathBuf;
 use std::sync::Arc;
 
+use super::git_watcher::GitDirWatcher;
 use super::workspace_item::WorkspaceItemView;
 
 /// The sidebar workspace list component.
@@ -20,6 +22,7 @@ pub struct WorkspaceListView {
     on_new_workspace: std::rc::Rc<dyn Fn(&mut Window, &mut App) + 'static>,
     scroll_handle: ScrollHandle,
     scrollbar_state: ScrollbarState,
+    git_watcher: Option<GitDirWatcher<Self>>,
 }
 
 impl WorkspaceListView {
@@ -60,7 +63,7 @@ impl WorkspaceListView {
             }
         }).detach();
 
-        Self {
+        let mut this = Self {
             db,
             workspace_views,
             terminal_panel,
@@ -70,7 +73,32 @@ impl WorkspaceListView {
             on_new_workspace,
             scroll_handle: ScrollHandle::new(),
             scrollbar_state: ScrollbarState::new(),
+            git_watcher: None,
+        };
+        this.rebuild_git_watcher(cx);
+        this
+    }
+
+    fn rebuild_git_watcher(&mut self, cx: &mut Context<Self>) {
+        // `refresh()` reconciles `workspace.is_git_repo` with reality before
+        // building views, so we can trust it here without re-statting.
+        let mut entries: Vec<(PathBuf, bool)> = self
+            .workspace_views
+            .iter()
+            .filter_map(|v| {
+                let ws = &v.read(cx).workspace;
+                ws.mount_path.as_ref().map(|p| (PathBuf::from(p), ws.is_git_repo))
+            })
+            .collect();
+        entries.sort();
+        entries.dedup();
+
+        if self.git_watcher.as_ref().map(|w| w.entries()) == Some(entries.as_slice()) {
+            return;
         }
+
+        let this = cx.entity().downgrade();
+        self.git_watcher = GitDirWatcher::new(entries, this, |view, cx| view.refresh(cx), cx);
     }
 
     /// Activate workspace at the given 0-based index.
@@ -145,7 +173,17 @@ impl WorkspaceListView {
     }
 
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
-        let workspaces = self.db.list_workspaces().unwrap_or_default();
+        let mut workspaces = self.db.list_workspaces().unwrap_or_default();
+        // Reconcile persisted `is_git_repo` with what's actually on disk.
+        // A user running `git init` after workspace creation flips the bit.
+        for ws in &mut workspaces {
+            let Some(ref path) = ws.mount_path else { continue };
+            let live = crate::git::is_git_repo(std::path::Path::new(path));
+            if live != ws.is_git_repo {
+                let _ = self.db.set_workspace_is_git_repo(ws.id, live);
+                ws.is_git_repo = live;
+            }
+        }
         self.workspace_views = Self::build_views(
             &self.db,
             &workspaces,
@@ -162,6 +200,7 @@ impl WorkspaceListView {
                 });
             }
         }
+        self.rebuild_git_watcher(cx);
         cx.notify();
     }
 

@@ -5,6 +5,7 @@ use crate::ui::terminal::TerminalPanel;
 use crate::ui::theme as t;
 use gpui::*;
 use gpui::prelude::FluentBuilder as _;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 /// Renders a single workspace row in the sidebar.
@@ -20,6 +21,14 @@ pub struct WorkspaceItemView {
     pub badge_index: Option<usize>, // 1-based display number, e.g. Some(1) for ⌘1
     pub agent_names: Vec<String>,
     pub agent_status: crate::ui::terminal::session::AgentStatus,
+    /// Current branch read from the repo's `.git/HEAD` at item-build time.
+    /// Also serves as the runtime "is git repo" signal — presence means we
+    /// successfully read HEAD, so the row renders as a repo. This overrides
+    /// the persisted `workspace.is_git_repo`, which is a creation-time
+    /// snapshot.
+    live_branch: Option<String>,
+    /// On-disk path to the cached GitHub owner avatar, if it exists.
+    avatar: Option<PathBuf>,
     show_menu: bool,
     menu_position: Point<Pixels>,
     hold_button: Option<Entity<HoldButton>>,
@@ -36,6 +45,23 @@ impl WorkspaceItemView {
         on_refresh: std::rc::Rc<dyn Fn(&mut App) + 'static>,
         on_activate: std::rc::Rc<dyn Fn(i64, &mut App) + 'static>,
     ) -> Self {
+        let (live_branch, avatar) = match workspace.mount_path.as_ref() {
+            Some(path) if crate::git::is_git_repo(std::path::Path::new(path)) => {
+                let repo = std::path::Path::new(path);
+                let branch = crate::git::read_head_branch(repo);
+                let owner = crate::git::github_owner_for_repo(repo);
+                let avatar_path = owner.as_ref().map(|o| crate::avatar_cache::avatar_path(o));
+                let avatar = avatar_path.as_ref().filter(|p| p.exists()).cloned();
+                if avatar.is_none() {
+                    if let Some(o) = owner {
+                        crate::avatar_cache::prefetch(o);
+                    }
+                }
+                (branch, avatar)
+            }
+            _ => (None, None),
+        };
+
         Self {
             workspace,
             cloned_from_name,
@@ -48,37 +74,97 @@ impl WorkspaceItemView {
             badge_index: None,
             agent_names: Vec::new(),
             agent_status: Default::default(),
+            live_branch,
+            avatar,
             show_menu: false,
             menu_position: Point::default(),
             hold_button: None,
         }
     }
 
-    fn subtitle(&self) -> String {
+    fn render_subtitle(&self) -> AnyElement {
+        let base = |text: String| -> AnyElement {
+            div()
+                .text_xs()
+                .text_color(t::text_ghost())
+                .overflow_hidden()
+                .line_height(px(14.0))
+                .child(text)
+                .into_any_element()
+        };
+
         if let Some(ref cloned_from) = self.cloned_from_name {
-            return format!("cloned from {cloned_from}");
+            return base(format!("cloned from {cloned_from}"));
         }
-        match (&self.workspace.mount_path, self.workspace.is_git_repo) {
+
+        match (&self.workspace.mount_path, self.live_branch.is_some()) {
             (Some(path), true) => {
-                let repo_name = path.split('/').last().unwrap_or(path);
-                let mut parts = vec![repo_name.to_string()];
-                if let Some(ref branch) = self.workspace.branch_name {
-                    parts.push(branch.clone());
+                let repo_name = path.split('/').last().unwrap_or(path).to_string();
+                let branch = self.live_branch.clone();
+                let pr = self.workspace.pr_number;
+
+                let mut row = div()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .text_xs()
+                    .text_color(t::text_ghost())
+                    .line_height(px(14.0))
+                    .overflow_hidden()
+                    .child(div().flex_shrink_0().child(repo_name));
+
+                if let Some(branch_name) = branch {
+                    row = row
+                        .child(
+                            div()
+                                .flex_shrink_0()
+                                .text_color(t::text_faint())
+                                .child("\u{00B7}"),
+                        )
+                        .child(
+                            svg()
+                                .path(SharedString::from("icons/git-branch.svg"))
+                                .size(px(11.0))
+                                .flex_shrink_0()
+                                .text_color(t::text_ghost()),
+                        )
+                        .child(div().flex_shrink_0().child(branch_name));
                 }
-                if let Some(pr) = self.workspace.pr_number {
-                    parts.push(format!("#{pr}"));
+
+                if let Some(n) = pr {
+                    row = row
+                        .child(
+                            div()
+                                .flex_shrink_0()
+                                .text_color(t::text_faint())
+                                .child("\u{00B7}"),
+                        )
+                        .child(div().flex_shrink_0().child(format!("#{n}")));
                 }
-                parts.join(" \u{00B7} ")
+
+                row.into_any_element()
             }
             (Some(path), false) => {
-                let short = if path.len() > 30 {
-                    format!("...{}", &path[path.len() - 27..])
-                } else {
-                    path.clone()
-                };
-                format!("{short} \u{00B7} no git")
+                let dir_name = path.split('/').last().unwrap_or(path).to_string();
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .text_xs()
+                    .text_color(t::text_ghost())
+                    .line_height(px(14.0))
+                    .overflow_hidden()
+                    .child(
+                        svg()
+                            .path(SharedString::from("icons/folder.svg"))
+                            .size(px(11.0))
+                            .flex_shrink_0()
+                            .text_color(t::text_ghost()),
+                    )
+                    .child(div().flex_shrink_0().child(dir_name))
+                    .into_any_element()
             }
-            (None, _) => "scratch sandbox".to_string(),
+            (None, _) => base("scratch sandbox".to_string()),
         }
     }
 
@@ -147,7 +233,6 @@ impl WorkspaceItemView {
 
 impl Render for WorkspaceItemView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let subtitle = self.subtitle();
         let diff_label = self.diff_label();
         let is_active = self.is_active;
         let workspace = self.workspace.clone();
@@ -251,10 +336,20 @@ impl Render for WorkspaceItemView {
                                     AgentStatus::NeedsInput { .. } => Some(t::agent_needs_input()),
                                     AgentStatus::Idle | AgentStatus::Unknown => None,
                                 };
+                                let avatar = self.avatar.clone();
                                 div()
                                     .flex()
                                     .items_center()
                                     .gap(px(5.0))
+                                    .when_some(avatar, |el, path| {
+                                        el.child(
+                                            img(path)
+                                                .w(px(12.0))
+                                                .h(px(12.0))
+                                                .rounded_full()
+                                                .flex_shrink_0(),
+                                        )
+                                    })
                                     .child(
                                         div()
                                             .text_xs()
@@ -281,14 +376,7 @@ impl Render for WorkspaceItemView {
                                     .child(label)
                             })),
                     )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(t::text_ghost())
-                            .overflow_hidden()
-                            .line_height(px(14.0))
-                            .child(subtitle),
-                    )
+                    .child(self.render_subtitle())
                     .when_some(self.agent_status.display_text(&self.agent_names), |el, status_text| {
                         use crate::ui::terminal::session::AgentStatus;
                         let color = match &self.agent_status {

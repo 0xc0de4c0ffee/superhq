@@ -132,6 +132,15 @@ impl Database {
         Ok(())
     }
 
+    pub fn set_workspace_is_git_repo(&self, id: i64, is_git_repo: bool) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE workspaces SET is_git_repo = ?1 WHERE id = ?2",
+            rusqlite::params![is_git_repo, id],
+        )?;
+        Ok(())
+    }
+
     /// Update cached git status for a workspace.
     #[allow(dead_code)]
     pub fn update_git_status(
