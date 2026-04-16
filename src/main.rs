@@ -662,7 +662,7 @@ fn main() -> Result<()> {
                 titlebar: Some(TitlebarOptions {
                     title: Some("superhq".into()),
                     appears_transparent: true,
-                    traffic_light_position: Some(point(px(8.0), px(8.0))),
+                    traffic_light_position: Some(point(px(8.0), px(10.0))),
                 }),
                 ..Default::default()
             },

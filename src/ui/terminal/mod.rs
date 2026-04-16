@@ -556,8 +556,10 @@ impl Render for TerminalPanel {
                                     .text_color(t::text_secondary())
                                     .hover(|s| s.bg(t::bg_hover()))
                                     .on_click(cx.listener(|this, _, window, cx| {
-                                        if let Some(ref cb) = this.on_open_settings {
-                                            cb(window, cx);
+                                        if let Some(cb) = this.on_open_settings.clone() {
+                                            window.defer(cx, move |window, cx| {
+                                                cb(window, cx);
+                                            });
                                         }
                                     }))
                                     .child("Open Settings"),

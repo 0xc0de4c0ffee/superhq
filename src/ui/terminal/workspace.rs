@@ -55,7 +55,7 @@ impl super::TerminalPanel {
     }
 
     pub fn set_on_open_settings(&mut self, cb: impl Fn(&mut Window, &mut App) + 'static) {
-        self.on_open_settings = Some(Box::new(cb));
+        self.on_open_settings = Some(Arc::new(cb));
     }
 
     pub fn set_on_open_port_dialog(&mut self, cb: impl Fn(i64, Option<Arc<AsyncSandbox>>, tokio::runtime::Handle, &mut Window, &mut App) + 'static) {

@@ -33,7 +33,7 @@ pub struct TerminalPanel {
     pub(super) pending_close: Option<(i64, u64)>,
     pub(super) missing_secrets_prompt: Option<MissingSecretsPrompt>,
     pub(super) skip_secret_check: bool,
-    pub(super) on_open_settings: Option<Box<dyn Fn(&mut Window, &mut App) + 'static>>,
+    pub(super) on_open_settings: Option<Arc<dyn Fn(&mut Window, &mut App) + 'static>>,
     pub(super) on_open_port_dialog: Option<Arc<dyn Fn(i64, Option<Arc<AsyncSandbox>>, tokio::runtime::Handle, &mut Window, &mut App) + 'static>>,
     pub(super) side_panel: Option<Entity<SidePanel>>,
     pub show_tab_badges: bool,
