@@ -11,7 +11,7 @@ use superhq_remote_proto::Notification;
 use tokio::sync::{mpsc, Mutex};
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber_wasm::MakeConsoleWriter;
-use wasm_bindgen::{prelude::wasm_bindgen, JsError};
+use wasm_bindgen::{prelude::wasm_bindgen, JsValue};
 
 use crate::client::RemoteClient;
 
@@ -66,16 +66,16 @@ impl DeviceCredential {
 #[wasm_bindgen]
 impl ClientHandle {
     /// Connect to a remote host by its EndpointId.
-    pub async fn connect(peer: String) -> Result<ClientHandle, JsError> {
+    pub async fn connect(peer: String) -> Result<ClientHandle, JsValue> {
         let endpoint = Endpoint::bind()
             .await
-            .map_err(|e| JsError::new(&format!("bind: {e}")))?;
+            .map_err(|e| js_err_msg(&format!("bind: {e}")))?;
         let peer_id: EndpointId = peer
             .parse()
-            .map_err(|e: iroh::KeyParsingError| JsError::new(&format!("parse peer: {e}")))?;
+            .map_err(|e: iroh::KeyParsingError| js_err_msg(&format!("parse peer: {e}")))?;
         let (client, notifications) = RemoteClient::connect(&endpoint, peer_id)
             .await
-            .map_err(|e| JsError::new(&format!("connect: {e}")))?;
+            .map_err(|e| js_err_msg(&format!("connect: {e}")))?;
         Ok(ClientHandle {
             endpoint,
             client,
@@ -89,7 +89,7 @@ impl ClientHandle {
     /// or `null` once the stream closes (the caller should stop
     /// looping at that point). Single-consumer: the first caller
     /// takes ownership of the receiver.
-    pub async fn next_notification(&self) -> Result<Option<String>, JsError> {
+    pub async fn next_notification(&self) -> Result<Option<String>, JsValue> {
         let mut slot = self.notifications.lock().await;
         let Some(rx) = slot.as_mut() else {
             return Ok(None);
@@ -114,7 +114,7 @@ impl ClientHandle {
     pub async fn pairing_request(
         &self,
         device_label: String,
-    ) -> Result<DeviceCredential, JsError> {
+    ) -> Result<DeviceCredential, JsValue> {
         use superhq_remote_proto::methods::PairingRequestParams;
         let result = self
             .client
@@ -136,17 +136,17 @@ impl ClientHandle {
         &self,
         device_label: String,
         credential: &DeviceCredential,
-    ) -> Result<String, JsError> {
+    ) -> Result<String, JsValue> {
         use crate::auth;
         use superhq_remote_proto::{
             methods::{SessionAuth, SessionHelloParams},
             PROTOCOL_VERSION,
         };
         let key = auth::decode_device_key(&credential.device_key_b64)
-            .map_err(|e| JsError::new(e))?;
+            .map_err(|e| js_err_msg(e))?;
         let ts = auth::now_secs();
         let proof = auth::compute_proof(&key, &self.peer_id, &credential.device_id, ts)
-            .map_err(|e| JsError::new(e))?;
+            .map_err(|e| js_err_msg(e))?;
         let result = self
             .client
             .session_hello(SessionHelloParams {
@@ -161,7 +161,7 @@ impl ClientHandle {
             })
             .await
             .map_err(js_err)?;
-        serde_json::to_string(&result).map_err(|e| JsError::new(&e.to_string()))
+        serde_json::to_string(&result).map_err(|e| js_err_msg(&e.to_string()))
     }
 
     /// Our local endpoint id (for display only).
@@ -171,7 +171,7 @@ impl ClientHandle {
 
     /// Call `session.hello` without auth. Only works if the host has
     /// `SUPERHQ_REMOTE_REQUIRE_AUTH` unset.
-    pub async fn session_hello(&self, device_label: String) -> Result<String, JsError> {
+    pub async fn session_hello(&self, device_label: String) -> Result<String, JsValue> {
         use superhq_remote_proto::{methods::SessionHelloParams, PROTOCOL_VERSION};
         let result = self
             .client
@@ -183,13 +183,13 @@ impl ClientHandle {
             })
             .await
             .map_err(js_err)?;
-        serde_json::to_string(&result).map_err(|e| JsError::new(&e.to_string()))
+        serde_json::to_string(&result).map_err(|e| js_err_msg(&e.to_string()))
     }
 
     /// Call `workspaces.list`. Returns JSON string of the workspace list.
-    pub async fn workspaces_list(&self) -> Result<String, JsError> {
+    pub async fn workspaces_list(&self) -> Result<String, JsValue> {
         let ws = self.client.workspaces_list().await.map_err(js_err)?;
-        serde_json::to_string(&ws).map_err(|e| JsError::new(&e.to_string()))
+        serde_json::to_string(&ws).map_err(|e| js_err_msg(&e.to_string()))
     }
 
     /// Call `workspace.activate`. Returns JSON string of the activated
@@ -197,20 +197,20 @@ impl ClientHandle {
     pub async fn workspace_activate(
         &self,
         workspace_id: i64,
-    ) -> Result<String, JsError> {
+    ) -> Result<String, JsValue> {
         use superhq_remote_proto::methods::WorkspaceActivateParams;
         let result = self
             .client
             .workspace_activate(WorkspaceActivateParams { workspace_id })
             .await
             .map_err(js_err)?;
-        serde_json::to_string(&result).map_err(|e| JsError::new(&e.to_string()))
+        serde_json::to_string(&result).map_err(|e| js_err_msg(&e.to_string()))
     }
 
     /// Call `tabs.list`. Returns JSON string of the tab list.
-    pub async fn tabs_list(&self) -> Result<String, JsError> {
+    pub async fn tabs_list(&self) -> Result<String, JsValue> {
         let tabs = self.client.tabs_list().await.map_err(js_err)?;
-        serde_json::to_string(&tabs).map_err(|e| JsError::new(&e.to_string()))
+        serde_json::to_string(&tabs).map_err(|e| js_err_msg(&e.to_string()))
     }
 
     /// Call `tabs.create`. `spec_json` is a JSON string encoding a
@@ -223,10 +223,10 @@ impl ClientHandle {
         &self,
         workspace_id: i64,
         spec_json: String,
-    ) -> Result<String, JsError> {
+    ) -> Result<String, JsValue> {
         use superhq_remote_proto::methods::{TabCreateSpec, TabsCreateParams};
         let spec: TabCreateSpec = serde_json::from_str(&spec_json)
-            .map_err(|e| JsError::new(&format!("parse spec: {e}")))?;
+            .map_err(|e| js_err_msg(&format!("parse spec: {e}")))?;
         let result = self
             .client
             .tabs_create(TabsCreateParams {
@@ -235,7 +235,7 @@ impl ClientHandle {
             })
             .await
             .map_err(js_err)?;
-        serde_json::to_string(&result).map_err(|e| JsError::new(&e.to_string()))
+        serde_json::to_string(&result).map_err(|e| js_err_msg(&e.to_string()))
     }
 
     /// Close a tab. `mode` is `"checkpoint"` (snapshot the sandbox and
@@ -245,13 +245,13 @@ impl ClientHandle {
         workspace_id: i64,
         tab_id: u64,
         mode: String,
-    ) -> Result<(), JsError> {
+    ) -> Result<(), JsValue> {
         use superhq_remote_proto::methods::{TabCloseMode, TabsCloseParams};
         let mode = match mode.as_str() {
             "checkpoint" => TabCloseMode::Checkpoint,
             "force" => TabCloseMode::Force,
             other => {
-                return Err(JsError::new(&format!(
+                return Err(js_err_msg(&format!(
                     "unknown close mode: {other}"
                 )))
             }
@@ -274,7 +274,7 @@ impl ClientHandle {
         workspace_id: i64,
         tab_id: u64,
         payload: Uint8Array,
-    ) -> Result<Uint8Array, JsError> {
+    ) -> Result<Uint8Array, JsValue> {
         use superhq_remote_proto::methods::PtyAttachParams;
         let attach = self
             .client
@@ -286,14 +286,14 @@ impl ClientHandle {
             .client
             .open_pty_stream(workspace_id, tab_id, attach.cols, attach.rows)
             .await
-            .map_err(|e| JsError::new(&format!("open pty stream: {e}")))?;
+            .map_err(|e| js_err_msg(&format!("open pty stream: {e}")))?;
 
         let payload_bytes = uint8array_to_vec(&payload);
         send.write_all(&payload_bytes)
             .await
-            .map_err(|e| JsError::new(&format!("write: {e}")))?;
+            .map_err(|e| js_err_msg(&format!("write: {e}")))?;
         send.finish()
-            .map_err(|e| JsError::new(&format!("finish: {e}")))?;
+            .map_err(|e| js_err_msg(&format!("finish: {e}")))?;
 
         let mut got = Vec::with_capacity(payload_bytes.len());
         let mut tmp = [0u8; 4096];
@@ -301,7 +301,7 @@ impl ClientHandle {
             match recv.read(&mut tmp).await {
                 Ok(Some(0)) | Ok(None) => break,
                 Ok(Some(n)) => got.extend_from_slice(&tmp[..n]),
-                Err(e) => return Err(JsError::new(&format!("read: {e}"))),
+                Err(e) => return Err(js_err_msg(&format!("read: {e}"))),
             }
         }
         Ok(vec_to_uint8array(&got))
@@ -316,7 +316,7 @@ impl ClientHandle {
         tab_id: u64,
         cols: u16,
         rows: u16,
-    ) -> Result<PtyStreamHandle, JsError> {
+    ) -> Result<PtyStreamHandle, JsValue> {
         use superhq_remote_proto::methods::{PtyAttachParams, PtyResizeParams};
         // Tell host we're attaching (gets dimensions + registers intent).
         let _attach = self
@@ -338,7 +338,7 @@ impl ClientHandle {
             .client
             .open_pty_stream(workspace_id, tab_id, cols, rows)
             .await
-            .map_err(|e| JsError::new(&format!("open pty stream: {e}")))?;
+            .map_err(|e| js_err_msg(&format!("open pty stream: {e}")))?;
         let client = self.client.clone();
         Ok(PtyStreamHandle {
             send: Arc::new(Mutex::new(send)),
@@ -370,7 +370,7 @@ pub struct PtyStreamHandle {
 impl PtyStreamHandle {
     /// Await the next chunk of bytes from the PTY. Returns a `Uint8Array`;
     /// an empty array means the stream closed (EOF).
-    pub async fn read_chunk(&self) -> Result<Uint8Array, JsError> {
+    pub async fn read_chunk(&self) -> Result<Uint8Array, JsValue> {
         let mut recv = self.recv.lock().await;
         let mut buf = [0u8; 8192];
         match recv.read(&mut buf).await {
@@ -380,22 +380,22 @@ impl PtyStreamHandle {
                 arr.copy_from(&buf[..n]);
                 Ok(arr)
             }
-            Err(e) => Err(JsError::new(&format!("read: {e}"))),
+            Err(e) => Err(js_err_msg(&format!("read: {e}"))),
         }
     }
 
     /// Write input bytes into the PTY.
-    pub async fn write(&self, data: Uint8Array) -> Result<(), JsError> {
+    pub async fn write(&self, data: Uint8Array) -> Result<(), JsValue> {
         let bytes = uint8array_to_vec(&data);
         let mut send = self.send.lock().await;
         send.write_all(&bytes)
             .await
-            .map_err(|e| JsError::new(&format!("write: {e}")))?;
+            .map_err(|e| js_err_msg(&format!("write: {e}")))?;
         Ok(())
     }
 
     /// Tell the host to resize the PTY to `cols × rows`.
-    pub async fn resize(&self, cols: u16, rows: u16) -> Result<(), JsError> {
+    pub async fn resize(&self, cols: u16, rows: u16) -> Result<(), JsValue> {
         use superhq_remote_proto::methods::PtyResizeParams;
         self.client
             .pty_resize(PtyResizeParams {
@@ -410,8 +410,46 @@ impl PtyStreamHandle {
     }
 }
 
-fn js_err(e: crate::RpcCallError) -> JsError {
-    JsError::new(&e.to_string())
+/// Plain-text JS Error helper — wraps a string message into a
+/// throwable JS `Error`. Equivalent to the old `js_err_msg(msg)`
+/// but typed as `JsValue` so it slots into methods that now return
+/// `Result<T, JsValue>`.
+fn js_err_msg(msg: impl AsRef<str>) -> JsValue {
+    js_sys::Error::new(msg.as_ref()).into()
+}
+
+/// Map an `RpcCallError` to a JS `Error` with extra machine-readable
+/// properties so callers don't have to string-match:
+///
+///   err.kind    — "transport" | "rpc" | "codec" | "closed" | "timeout"
+///   err.code    — numeric JSON-RPC code (only present when kind="rpc")
+///   err.message — human-readable summary (same as err.toString())
+///
+/// Previously this returned a plain `JsError` built from `e.to_string()`,
+/// which threw away `RpcError.code` and forced the JS side to parse the
+/// message to distinguish auth failures from transport drops.
+fn js_err(e: crate::RpcCallError) -> JsValue {
+    let err = js_sys::Error::new(&e.to_string());
+    let (kind, code) = match &e {
+        crate::RpcCallError::Transport(_) => ("transport", None),
+        crate::RpcCallError::Rpc(r) => ("rpc", Some(r.code)),
+        crate::RpcCallError::Codec(_) => ("codec", None),
+        crate::RpcCallError::Closed => ("closed", None),
+        crate::RpcCallError::Timeout(_) => ("timeout", None),
+    };
+    let _ = js_sys::Reflect::set(
+        &err,
+        &JsValue::from_str("kind"),
+        &JsValue::from_str(kind),
+    );
+    if let Some(c) = code {
+        let _ = js_sys::Reflect::set(
+            &err,
+            &JsValue::from_str("code"),
+            &JsValue::from_f64(c as f64),
+        );
+    }
+    err.into()
 }
 
 fn uint8array_to_vec(a: &Uint8Array) -> Vec<u8> {

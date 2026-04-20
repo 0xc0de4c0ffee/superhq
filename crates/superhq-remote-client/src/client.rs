@@ -7,6 +7,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
     },
+    time::Duration,
 };
 
 use anyhow::{anyhow, Result};
@@ -26,6 +27,24 @@ use tokio::{
 };
 use tracing::{debug, warn};
 
+/// Upper bound on how long a single RPC waits before giving up. A
+/// responsive host answers in milliseconds; 60s covers genuinely slow
+/// operations like workspace activation / agent sandbox boot.
+const DEFAULT_RPC_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Cross-platform async sleep. `tokio::time` isn't supported on wasm
+/// (no timer driver), so we fall through to gloo-timers there.
+async fn sleep(dur: Duration) {
+    #[cfg(not(target_family = "wasm"))]
+    {
+        tokio::time::sleep(dur).await;
+    }
+    #[cfg(target_family = "wasm")]
+    {
+        gloo_timers::future::sleep(dur).await;
+    }
+}
+
 /// Error calling an RPC method.
 #[derive(Debug, thiserror::Error)]
 pub enum RpcCallError {
@@ -37,6 +56,8 @@ pub enum RpcCallError {
     Codec(String),
     #[error("connection closed before response")]
     Closed,
+    #[error("rpc timed out after {0:?}")]
+    Timeout(Duration),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -111,6 +132,11 @@ impl RemoteClient {
 
     /// Low-level typed RPC call. Serializes `params`, sends a request,
     /// awaits the matching response, deserializes the result.
+    ///
+    /// Cleans up its `pending` entry on *every* exit path (send failure,
+    /// timeout, connection close) so the map never accumulates dead
+    /// waiters. Enforces a per-call timeout so an unresponsive host
+    /// can't strand a caller forever.
     pub async fn call<P, R>(&self, method: &str, params: P) -> Result<R, RpcCallError>
     where
         P: serde::Serialize,
@@ -129,17 +155,47 @@ impl RemoteClient {
             pending.insert(id, tx);
         }
 
+        // Helper: drop the pending entry. Called from every error path
+        // so we never leak a dead sender into the map.
+        let drop_pending = || {
+            if let Ok(mut p) = self.inner.pending.lock() {
+                p.remove(&id);
+            }
+        };
+
         {
             let mut send = self.inner.ctrl_send.lock().await;
-            send.write_all(wire.as_bytes())
-                .await
-                .map_err(|e| RpcCallError::Transport(e.to_string()))?;
-            send.write_all(b"\n")
-                .await
-                .map_err(|e| RpcCallError::Transport(e.to_string()))?;
+            if let Err(e) = send.write_all(wire.as_bytes()).await {
+                drop_pending();
+                return Err(RpcCallError::Transport(e.to_string()));
+            }
+            if let Err(e) = send.write_all(b"\n").await {
+                drop_pending();
+                return Err(RpcCallError::Transport(e.to_string()));
+            }
         }
 
-        let resp = rx.await.map_err(|_| RpcCallError::Closed)?;
+        // Race the response against the timeout. Whichever wakes first
+        // wins; the other is cancelled on drop.
+        let resp = {
+            use futures_util::{future::Either, pin_mut};
+            let timer = sleep(DEFAULT_RPC_TIMEOUT);
+            pin_mut!(rx);
+            pin_mut!(timer);
+            match futures_util::future::select(rx, timer).await {
+                Either::Left((resp, _)) => match resp {
+                    Ok(r) => r,
+                    Err(_) => {
+                        drop_pending();
+                        return Err(RpcCallError::Closed);
+                    }
+                },
+                Either::Right(_) => {
+                    drop_pending();
+                    return Err(RpcCallError::Timeout(DEFAULT_RPC_TIMEOUT));
+                }
+            }
+        };
         if let Some(err) = resp.error {
             return Err(RpcCallError::Rpc(err));
         }
@@ -271,6 +327,20 @@ async fn run_control_recv_loop(
     pending: PendingMap,
     notifications: mpsc::UnboundedSender<Notification>,
 ) -> Result<()> {
+    // Drain every pending waiter on ANY exit (EOF or error). Previously
+    // we only cleared on clean EOF, so a transport I/O error would
+    // bubble up via `?` and leave every in-flight RPC hanging forever.
+    // A Drop guard handles it uniformly.
+    struct DrainPending(PendingMap);
+    impl Drop for DrainPending {
+        fn drop(&mut self) {
+            if let Ok(mut p) = self.0.lock() {
+                p.clear();
+            }
+        }
+    }
+    let _drain_on_exit = DrainPending(pending.clone());
+
     let mut reader = BufReader::new(recv);
     let mut buf = Vec::new();
 
@@ -279,9 +349,6 @@ async fn run_control_recv_loop(
         let n = reader.read_until(b'\n', &mut buf).await?;
         if n == 0 {
             debug!("remote-client: control stream closed by peer");
-            // Wake any pending calls so they don't hang.
-            let mut p = pending.lock().unwrap();
-            p.clear();
             return Ok(());
         }
         while matches!(buf.last(), Some(b'\n' | b'\r')) {
@@ -307,9 +374,12 @@ async fn run_control_recv_loop(
                 }
             }
             Ok(Message::Notification(note)) => {
+                // Don't let a dropped notification consumer kill the
+                // control-stream reader — that used to strand all
+                // subsequent RPC responses. Just drop the notification
+                // and keep looping.
                 if notifications.send(note).is_err() {
-                    debug!("remote-client: notifications receiver dropped");
-                    return Ok(());
+                    debug!("remote-client: notifications receiver dropped; ignoring");
                 }
             }
             Ok(Message::Request(req)) => {
