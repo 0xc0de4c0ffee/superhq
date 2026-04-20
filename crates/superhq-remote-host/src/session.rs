@@ -122,9 +122,22 @@ async fn drive_control_stream<H: RemoteHandler>(
     // Host-originated notifications — whatever the handler wants to
     // push. Each item on this channel is already-encoded JSON-RPC
     // notification text (no trailing newline).
-    let mut notifications = handler.subscribe_notifications();
+    //
+    // Deliberately deferred until the session is authenticated. A
+    // previous version subscribed eagerly, which meant any peer that
+    // opened a control stream started receiving host notifications
+    // before they had proven pairing. `None` means "don't push yet".
+    let mut notifications: Option<
+        tokio::sync::broadcast::Receiver<std::sync::Arc<String>>,
+    > = None;
 
     loop {
+        // One-shot subscription the instant the session is authenticated.
+        // Polled before every select so we catch the transition even if
+        // auth and the next iteration race.
+        if notifications.is_none() && session.authenticated.load(Ordering::Acquire) {
+            notifications = handler.subscribe_notifications();
+        }
         tokio::select! {
             // Client → host request / notification
             read = reader.read_until(b'\n', &mut buf) => {

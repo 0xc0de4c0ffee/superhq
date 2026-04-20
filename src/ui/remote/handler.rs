@@ -66,9 +66,12 @@ impl AppHandler {
         commands: HostCommandDispatcher,
         notifications: tokio::sync::broadcast::Sender<Arc<String>>,
     ) -> Self {
+        // Auth is required by default. The only opt-out is an explicit
+        // env override — previously the default was `false`, which let
+        // any peer that reached the iroh endpoint skip pairing entirely.
         let require_auth = std::env::var("SUPERHQ_REMOTE_REQUIRE_AUTH")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false);
+            .map(|v| !(v == "0" || v.eq_ignore_ascii_case("false")))
+            .unwrap_or(true);
         let auto_approve_pairings = std::env::var("SUPERHQ_REMOTE_AUTO_APPROVE_PAIRINGS")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
