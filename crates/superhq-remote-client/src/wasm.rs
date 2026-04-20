@@ -130,8 +130,9 @@ impl ClientHandle {
         })
     }
 
-    /// `session.hello` with a device credential. Computes the HMAC proof
-    /// locally and includes it in the request.
+    /// `session.hello` with a device credential. Calls
+    /// `session.challenge` first to get a nonce, then HMACs the nonce
+    /// with the device key and sends the proof in `session.hello`.
     pub async fn session_hello_auth(
         &self,
         device_label: String,
@@ -144,9 +145,11 @@ impl ClientHandle {
         };
         let key = auth::decode_device_key(&credential.device_key_b64)
             .map_err(|e| js_err_msg(e))?;
-        let ts = auth::now_secs();
-        let proof = auth::compute_proof(&key, &self.peer_id, &credential.device_id, ts)
-            .map_err(|e| js_err_msg(e))?;
+        let challenge = self.client.session_challenge().await.map_err(js_err)?;
+        let nonce = auth::decode_nonce(&challenge.nonce).map_err(|e| js_err_msg(e))?;
+        let proof =
+            auth::compute_proof(&key, &self.peer_id, &credential.device_id, &nonce)
+                .map_err(|e| js_err_msg(e))?;
         let result = self
             .client
             .session_hello(SessionHelloParams {
@@ -155,7 +158,6 @@ impl ClientHandle {
                 resume_token: None,
                 auth: Some(SessionAuth {
                     device_id: credential.device_id.clone(),
-                    timestamp: ts,
                     proof,
                 }),
             })

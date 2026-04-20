@@ -35,7 +35,7 @@ where
     R: tokio::io::AsyncRead + Unpin,
 {
     let req = Request::new(
-        1000,
+        1000u64.into(),
         methods::SESSION_HELLO,
         serde_json::to_value(methods::SessionHelloParams {
             protocol_version: PROTOCOL_VERSION,
@@ -68,7 +68,7 @@ async fn hello_roundtrip() -> Result<()> {
 
     // session.hello
     let hello = Request::new(
-        1,
+        1u64.into(),
         methods::SESSION_HELLO,
         serde_json::to_value(methods::SessionHelloParams {
             protocol_version: PROTOCOL_VERSION,
@@ -88,7 +88,7 @@ async fn hello_roundtrip() -> Result<()> {
 
     match msg {
         Message::Response(resp) => {
-            assert_eq!(resp.id, 1);
+            assert_eq!(resp.id.as_number(), Some(1u64));
             assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
             let result: methods::SessionHelloResult =
                 serde_json::from_value(resp.result.unwrap())?;
@@ -117,7 +117,7 @@ async fn tabs_list_is_empty() -> Result<()> {
     let mut reader = BufReader::new(recv);
     hello(&mut send, &mut reader).await?;
 
-    let req = Request::new(7, methods::TABS_LIST, serde_json::json!({}));
+    let req = Request::new(7u64.into(), methods::TABS_LIST, serde_json::json!({}));
     send.write_all(encode_request(&req)?.as_bytes()).await?;
     send.write_all(b"\n").await?;
 
@@ -128,7 +128,7 @@ async fn tabs_list_is_empty() -> Result<()> {
 
     match msg {
         Message::Response(resp) => {
-            assert_eq!(resp.id, 7);
+            assert_eq!(resp.id.as_number(), Some(7u64));
             let tabs: methods::TabsListResult =
                 serde_json::from_value(resp.result.unwrap())?;
             assert_eq!(tabs.len(), 0);
@@ -156,7 +156,7 @@ async fn pty_echo_through_stream() -> Result<()> {
     hello(&mut ctrl_send, &mut ctrl_reader).await?;
 
     let attach_req = Request::new(
-        1,
+        1u64.into(),
         methods::PTY_ATTACH,
         serde_json::to_value(methods::PtyAttachParams { workspace_id: 1, tab_id: 42 })?,
     );
@@ -181,7 +181,7 @@ async fn pty_echo_through_stream() -> Result<()> {
 
     // Send StreamInit::Pty as a JSON-RPC stream.init request.
     let init_req = Request::new(
-        1,
+        1u64.into(),
         STREAM_INIT,
         serde_json::to_value(StreamInit::Pty { workspace_id: 1, tab_id: 42, cols: 80, rows: 24 })?,
     );
@@ -233,7 +233,7 @@ async fn tabs_list_pre_hello_is_rejected() -> Result<()> {
     let (mut send, recv) = conn.open_bi().await?;
 
     // Skip session.hello — go straight to tabs.list.
-    let req = Request::new(42, methods::TABS_LIST, serde_json::json!({}));
+    let req = Request::new(42u64.into(), methods::TABS_LIST, serde_json::json!({}));
     send.write_all(encode_request(&req)?.as_bytes()).await?;
     send.write_all(b"\n").await?;
 
@@ -244,7 +244,7 @@ async fn tabs_list_pre_hello_is_rejected() -> Result<()> {
     let msg = decode(text)?;
     match msg {
         Message::Response(resp) => {
-            assert_eq!(resp.id, 42);
+            assert_eq!(resp.id.as_number(), Some(42u64));
             let err = resp.error.expect("expected error");
             assert_eq!(err.code, superhq_remote_proto::error_code::AUTH_REQUIRED);
         }
@@ -268,7 +268,7 @@ async fn unknown_method_returns_error() -> Result<()> {
     let mut reader = BufReader::new(recv);
     hello(&mut send, &mut reader).await?;
 
-    let req = Request::new(99, "does.not.exist", serde_json::json!({}));
+    let req = Request::new(99u64.into(), "does.not.exist", serde_json::json!({}));
     send.write_all(encode_request(&req)?.as_bytes()).await?;
     send.write_all(b"\n").await?;
 
@@ -279,7 +279,7 @@ async fn unknown_method_returns_error() -> Result<()> {
 
     match msg {
         Message::Response(resp) => {
-            assert_eq!(resp.id, 99);
+            assert_eq!(resp.id.as_number(), Some(99u64));
             let err = resp.error.expect("expected error");
             assert_eq!(
                 err.code,

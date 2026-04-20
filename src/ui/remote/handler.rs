@@ -1,14 +1,21 @@
 //! Real `RemoteHandler` implementation.
 
-use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use superhq_remote_host::{
-    generate_device_key, now_secs, verify_proof, AuthError, EndpointId, RecvStream,
+    generate_device_key, verify_proof, AuthError, EndpointId, RecvStream,
     RemoteHandler, SendStream,
 };
+
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
 use superhq_remote_proto::{
     error_code,
     methods::{
@@ -55,13 +62,6 @@ pub struct AppHandler {
     require_auth: bool,
     /// If true, pairing requests are auto-approved without UI. Dev/demo only.
     auto_approve_pairings: bool,
-    /// Per-device most-recent-accepted timestamp. Blocks replay: the
-    /// same HMAC proof cannot authenticate twice because the second
-    /// attempt's timestamp is not strictly greater than the first's.
-    /// In-memory only — on process restart the guard resets, which
-    /// still leaves a one-replay-per-restart window but closes the
-    /// previous 5-minute skew-window replay gap.
-    replay_guard: Arc<RwLock<HashMap<String, u64>>>,
 }
 
 impl AppHandler {
@@ -100,7 +100,6 @@ impl AppHandler {
             host_node_id: Arc::new(RwLock::new(None)),
             require_auth,
             auto_approve_pairings,
-            replay_guard: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -176,8 +175,14 @@ impl AppHandler {
             .and_then(|m| m.get(&(workspace_id, tab_id)).cloned())
     }
 
-    /// Check auth: returns Ok(()) if acceptable, Err(RpcError) otherwise.
-    fn check_auth(&self, auth: Option<&SessionAuth>) -> Result<(), RpcError> {
+    /// Verify the client's session.hello proof against the nonce the
+    /// transport layer handed us for this connection. Returns Ok when
+    /// the proof validates; RpcError otherwise.
+    fn check_auth(
+        &self,
+        auth: Option<&SessionAuth>,
+        challenge: Option<[u8; 32]>,
+    ) -> Result<(), RpcError> {
         let Some(auth) = auth else {
             if self.require_auth {
                 return Err(RpcError::new(
@@ -186,6 +191,12 @@ impl AppHandler {
                 ));
             }
             return Ok(());
+        };
+        let Some(challenge) = challenge else {
+            return Err(RpcError::new(
+                error_code::AUTH_INVALID,
+                "no pending challenge on this connection; call session.challenge first",
+            ));
         };
         let Some(host_id) = self.host_id() else {
             return Err(RpcError::new(
@@ -208,31 +219,10 @@ impl AppHandler {
             &key_bytes,
             &host_id,
             &auth.device_id,
-            auth.timestamp,
+            &challenge,
             &auth.proof,
-            now_secs(),
         )
         .map_err(auth_err_to_rpc)?;
-        // Replay protection: require strictly increasing timestamps per
-        // device. Captured proofs within the 5-minute skew window used
-        // to be reusable; this closes that gap. Check-and-set atomically
-        // under the write lock so racing hellos can't both be accepted.
-        {
-            let mut g = self.replay_guard.write().map_err(|_| {
-                RpcError::new(
-                    error_code::INTERNAL_ERROR,
-                    "replay guard lock poisoned",
-                )
-            })?;
-            let last = g.get(&auth.device_id).copied().unwrap_or(0);
-            if auth.timestamp <= last {
-                return Err(RpcError::new(
-                    error_code::AUTH_INVALID,
-                    "replay rejected: timestamp not greater than last accepted",
-                ));
-            }
-            g.insert(auth.device_id.clone(), auth.timestamp);
-        }
         // Auth passed — bump last_seen_at for the paired-devices UI later.
         self.pairings.touch(&auth.device_id, now_secs());
         Ok(())
@@ -248,8 +238,9 @@ impl RemoteHandler for AppHandler {
     async fn session_hello(
         &self,
         params: SessionHelloParams,
+        challenge: Option<[u8; 32]>,
     ) -> Result<SessionHelloResult, RpcError> {
-        self.check_auth(params.auth.as_ref())?;
+        self.check_auth(params.auth.as_ref(), challenge)?;
         let accepted = params.protocol_version.min(PROTOCOL_VERSION);
         let snap = self.read_state();
         Ok(SessionHelloResult {

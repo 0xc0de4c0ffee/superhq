@@ -51,6 +51,10 @@ pub struct SessionState {
     /// Incremented when a stream task starts, decremented on exit.
     /// Gates acceptance so a single client can't open unbounded streams.
     pub data_streams: AtomicUsize,
+    /// Fresh 32-byte nonce issued by `session.challenge`. Consumed
+    /// (set to None) on the first `session.hello` attempt. Clients
+    /// must challenge again after any failed hello.
+    pub pending_challenge: Mutex<Option<[u8; 32]>>,
 }
 
 impl SessionState {
@@ -59,6 +63,7 @@ impl SessionState {
             authenticated: AtomicBool::new(false),
             device_id: Mutex::new(None),
             data_streams: AtomicUsize::new(0),
+            pending_challenge: Mutex::new(None),
         }
     }
 
@@ -284,7 +289,10 @@ async fn dispatch_control_request<H: RemoteHandler>(
     // session.hello first.
     let pre_auth_ok = matches!(
         method.as_str(),
-        methods::SESSION_HELLO | methods::PAIRING_REQUEST | methods::SESSION_PING
+        methods::SESSION_HELLO
+            | methods::SESSION_CHALLENGE
+            | methods::PAIRING_REQUEST
+            | methods::SESSION_PING
     );
     if !pre_auth_ok && !session.authenticated.load(Ordering::Acquire) {
         let err = RpcError::new(
@@ -296,11 +304,35 @@ async fn dispatch_control_request<H: RemoteHandler>(
     }
 
     let result = match method.as_str() {
+        methods::SESSION_CHALLENGE => {
+            // Generate a fresh one-shot nonce and stash it on this
+            // connection. The next session.hello's HMAC must bind
+            // to this exact value.
+            let nonce = crate::auth::generate_challenge();
+            if let Ok(mut g) = session.pending_challenge.lock() {
+                *g = Some(nonce);
+            }
+            use base64::{engine::general_purpose::STANDARD, Engine};
+            let result = methods::SessionChallengeResult {
+                nonce: STANDARD.encode(nonce),
+            };
+            serde_json::to_value(result)
+                .map_err(|e| RpcError::internal(format!("encode result: {e}")))
+        }
         methods::SESSION_HELLO => {
+            // Consume (take) the pending challenge before handing
+            // off. Any failure of this hello invalidates it too, so
+            // a retry needs a fresh session.challenge.
+            let challenge = session
+                .pending_challenge
+                .lock()
+                .ok()
+                .and_then(|mut g| g.take());
             // Preserve the raw params so that on a successful hello we
             // can stash the authenticated device id in the session state.
             let params_raw = req.params.clone();
-            let r = call_method(req.params, |p| handler.session_hello(p)).await;
+            let r = call_method(req.params, |p| handler.session_hello(p, challenge))
+                .await;
             if r.is_ok() {
                 session.authenticated.store(true, Ordering::Release);
                 if let Some(device_id) = params_raw

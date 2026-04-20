@@ -215,6 +215,12 @@ impl RemoteClient {
         self.call(methods::SESSION_HELLO, params).await
     }
 
+    pub async fn session_challenge(
+        &self,
+    ) -> Result<methods::SessionChallengeResult, RpcCallError> {
+        self.call(methods::SESSION_CHALLENGE, serde_json::json!({})).await
+    }
+
     pub async fn pairing_request(
         &self,
         params: methods::PairingRequestParams,

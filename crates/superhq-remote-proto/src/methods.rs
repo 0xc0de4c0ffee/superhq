@@ -10,9 +10,23 @@ use crate::types::{AgentInfo, BlobHandle, TabId, TabInfo, WorkspaceId, Workspace
 // ── Session ─────────────────────────────────────────────────────
 
 pub const SESSION_HELLO: &str = "session.hello";
+pub const SESSION_CHALLENGE: &str = "session.challenge";
 pub const SESSION_PING: &str = "session.ping";
 pub const SESSION_CLOSE: &str = "session.close";
 pub const PAIRING_REQUEST: &str = "pairing.request";
+
+/// Request a one-shot nonce that the client will bind into its
+/// session.hello HMAC transcript. Must be called before session.hello.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct SessionChallengeParams {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SessionChallengeResult {
+    /// Base64-encoded 32 random bytes. The server remembers this per
+    /// connection and invalidates it the first time it verifies a
+    /// session.hello against it.
+    pub nonce: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SessionHelloParams {
@@ -32,14 +46,15 @@ pub struct SessionHelloParams {
 
 /// Proof of pairing, included on every `session.hello`.
 ///
-/// The `proof` is HMAC-SHA256 over the ASCII transcript:
-///   `"superhq:v1:" || host_node_id || ":" || device_id || ":" || timestamp`
-/// using `device_key` as the HMAC key. `timestamp` is a UNIX second
-/// count; hosts accept up to ±5 minutes of drift.
+/// The `proof` is HMAC-SHA256 over:
+///   `"superhq:v1:" || host_node_id || ":" || device_id || ":" || nonce_bytes`
+/// using `device_key` as the HMAC key. `nonce_bytes` is the raw 32
+/// bytes the server handed out in the preceding `session.challenge`
+/// call on the same connection. Nonces are one-shot: the server
+/// invalidates it the moment it is verified.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SessionAuth {
     pub device_id: String,
-    pub timestamp: u64,
     /// Base64-encoded HMAC-SHA256 output (32 bytes).
     pub proof: String,
 }

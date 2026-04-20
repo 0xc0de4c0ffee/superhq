@@ -9,7 +9,9 @@ pub mod handler;
 pub mod server;
 pub mod session;
 
-pub use auth::{compute_proof, generate_device_key, now_secs, verify_proof, AuthError};
+pub use auth::{
+    compute_proof, generate_challenge, generate_device_key, verify_proof, AuthError,
+};
 pub use handler::{RemoteHandler, StubHandler};
 pub use server::RemoteServer;
 

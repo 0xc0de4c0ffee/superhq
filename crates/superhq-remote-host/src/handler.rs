@@ -24,13 +24,18 @@ use superhq_remote_proto::{
 /// where `RpcError` will be serialized back to the peer verbatim.
 #[async_trait]
 pub trait RemoteHandler: Send + Sync + 'static {
-    /// Handle `session.hello` — negotiate protocol version and return the
-    /// initial workspaces + tabs snapshot. Implementations that require
-    /// auth should check `params.auth` and return an `AUTH_REQUIRED` or
-    /// `AUTH_INVALID` error if missing/wrong.
+    /// Handle `session.hello`.
+    ///
+    /// `challenge` is the 32-byte nonce the server issued via the
+    /// preceding `session.challenge` call on this connection, or
+    /// `None` if the client skipped that step. A server that
+    /// requires auth should reject `None` with `AUTH_INVALID`.
+    /// The nonce has already been consumed from session state;
+    /// handlers receive it at-most-once here.
     async fn session_hello(
         &self,
         params: SessionHelloParams,
+        challenge: Option<[u8; 32]>,
     ) -> Result<SessionHelloResult, RpcError>;
 
     /// Handle `pairing.request` — issue credentials to a new device.
@@ -165,6 +170,7 @@ impl RemoteHandler for StubHandler {
     async fn session_hello(
         &self,
         params: SessionHelloParams,
+        _challenge: Option<[u8; 32]>,
     ) -> Result<SessionHelloResult, RpcError> {
         use superhq_remote_proto::PROTOCOL_VERSION;
         let accepted = params.protocol_version.min(PROTOCOL_VERSION);
