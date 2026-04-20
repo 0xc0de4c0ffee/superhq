@@ -1,5 +1,6 @@
 //! Real `RemoteHandler` implementation.
 
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
@@ -54,6 +55,13 @@ pub struct AppHandler {
     require_auth: bool,
     /// If true, pairing requests are auto-approved without UI. Dev/demo only.
     auto_approve_pairings: bool,
+    /// Per-device most-recent-accepted timestamp. Blocks replay: the
+    /// same HMAC proof cannot authenticate twice because the second
+    /// attempt's timestamp is not strictly greater than the first's.
+    /// In-memory only — on process restart the guard resets, which
+    /// still leaves a one-replay-per-restart window but closes the
+    /// previous 5-minute skew-window replay gap.
+    replay_guard: Arc<RwLock<HashMap<String, u64>>>,
 }
 
 impl AppHandler {
@@ -92,6 +100,7 @@ impl AppHandler {
             host_node_id: Arc::new(RwLock::new(None)),
             require_auth,
             auto_approve_pairings,
+            replay_guard: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -204,6 +213,26 @@ impl AppHandler {
             now_secs(),
         )
         .map_err(auth_err_to_rpc)?;
+        // Replay protection: require strictly increasing timestamps per
+        // device. Captured proofs within the 5-minute skew window used
+        // to be reusable; this closes that gap. Check-and-set atomically
+        // under the write lock so racing hellos can't both be accepted.
+        {
+            let mut g = self.replay_guard.write().map_err(|_| {
+                RpcError::new(
+                    error_code::INTERNAL_ERROR,
+                    "replay guard lock poisoned",
+                )
+            })?;
+            let last = g.get(&auth.device_id).copied().unwrap_or(0);
+            if auth.timestamp <= last {
+                return Err(RpcError::new(
+                    error_code::AUTH_INVALID,
+                    "replay rejected: timestamp not greater than last accepted",
+                ));
+            }
+            g.insert(auth.device_id.clone(), auth.timestamp);
+        }
         // Auth passed — bump last_seen_at for the paired-devices UI later.
         self.pairings.touch(&auth.device_id, now_secs());
         Ok(())
