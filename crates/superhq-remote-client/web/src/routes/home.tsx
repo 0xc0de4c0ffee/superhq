@@ -8,6 +8,7 @@ import { useCallback, useState } from "react";
 import { useNavigate } from "react-router";
 import Screen from "../components/Screen";
 import SettingsSheet from "../components/SettingsSheet";
+import PullToRefresh from "../components/PullToRefresh";
 import { useConnectionStore } from "../state/store";
 import { activateWorkspace, refreshSnapshot } from "../lib/session";
 import { track } from "../lib/analytics";
@@ -105,7 +106,11 @@ export default function HomeRoute() {
             ) : workspaces.length === 0 ? (
                 <EmptyView />
             ) : (
-                <div className="flex flex-1 flex-col overflow-y-auto px-4 pb-8">
+                <PullToRefresh
+                    className="px-4 pb-8"
+                    onRefresh={refreshNow}
+                    disabled={refreshing}
+                >
                     {actionError ? (
                         <div className="mt-3 rounded-2xl bg-red-500/10 px-3 py-2.5 text-[13px] text-app-error">
                             {actionError}
@@ -129,7 +134,7 @@ export default function HomeRoute() {
                             </li>
                         ))}
                     </ul>
-                </div>
+                </PullToRefresh>
             )}
             <SettingsSheet
                 open={settingsOpen}
