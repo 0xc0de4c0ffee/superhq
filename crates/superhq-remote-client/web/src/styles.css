@@ -111,3 +111,13 @@ body {
 .glass-pill--accent:active {
     background: rgba(99, 102, 241, 1);
 }
+
+/* Breathing dot for the agent-boot view. Matches the desktop setup
+ * view's 2s cosine-ish opacity fade on the active step indicator. */
+@keyframes breathing {
+    0%, 100% { opacity: 0.35; }
+    50%      { opacity: 1; }
+}
+.breathing-dot {
+    animation: breathing 2s ease-in-out infinite;
+}

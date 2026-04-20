@@ -186,6 +186,9 @@ export default function WorkspaceRoute() {
                 </div>
             ) : null}
 
+            {/* Booting / setup-error overlays are stacked above the
+             * persistent TerminalHost so per-tab lifecycle changes
+             * don't tear the terminal down. */}
             {client && wsTabs.length > 0 ? (
                 // One persistent xterm per ready tab, stacked and
                 // visibility-toggled — switching tabs is now instant
@@ -210,7 +213,7 @@ export default function WorkspaceRoute() {
                         </div>
                     ) : activeTab && !activeTab.pty_ready ? (
                         <div className="absolute inset-0 bg-app-base">
-                            <BootingView tab={activeTab} />
+                            <BootingView tab={activeTab} agents={agents} />
                         </div>
                     ) : null}
                 </div>
@@ -358,15 +361,34 @@ function NavTabs({
 }
 
 
-function BootingView({ tab }: { tab: TabInfo }) {
+/// Mirrors the desktop setup view: centered agent icon on top,
+/// then a breathing-dot + label row below it. Without full setup-step
+/// info over the wire (the mobile proto exposes only pty_ready and
+/// setup_error), we render a single "Starting workspace" row — the
+/// breathing dot communicates live activity to the user.
+function BootingView({ tab, agents }: { tab: TabInfo; agents: AgentInfo[] }) {
+    const agent =
+        tab.kind === "agent"
+            ? agents.find((a) => a.display_name === tab.label)
+            : undefined;
+    const accent = agent?.color ?? undefined;
     return (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 bg-app-base px-6 text-center">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-app-accent" />
-            <div className="text-sm text-app-text">
-                Starting <span className="font-medium">{tab.label}</span>…
-            </div>
-            <div className="text-xs text-app-text-muted">
-                Waiting for the host to finish booting the sandbox.
+        <div
+            className="flex flex-1 flex-col items-center justify-center gap-4 bg-app-base px-6"
+            style={accent ? { color: accent } : undefined}
+        >
+            {agent ? (
+                <span className="flex h-8 w-8 items-center justify-center [&>svg]:h-full [&>svg]:w-full">
+                    <AgentIcon agent={agent} />
+                </span>
+            ) : (
+                <span className="flex h-8 w-8 items-center justify-center text-app-text-muted">
+                    <ShellIcon size={22} />
+                </span>
+            )}
+            <div className="flex items-center gap-2 text-[13px] text-app-text-secondary">
+                <span className="breathing-dot inline-block h-1.5 w-1.5 rounded-full bg-current" />
+                <span>Starting workspace</span>
             </div>
         </div>
     );

@@ -4,6 +4,11 @@ import tailwindcss from "@tailwindcss/vite";
 import { VitePWA } from "vite-plugin-pwa";
 import { viteStaticCopy } from "vite-plugin-static-copy";
 import { resolve } from "node:path";
+import { readFileSync } from "node:fs";
+
+const pkg = JSON.parse(
+    readFileSync(resolve(__dirname, "package.json"), "utf-8"),
+) as { version: string };
 
 // The WASM bundle lives at `crates/superhq-remote-client/pkg/` and is
 // produced by `demo/build.sh`. We copy it verbatim into the web build
@@ -27,6 +32,9 @@ export default defineConfig({
         alias: {
             "@": resolve(__dirname, "src"),
         },
+    },
+    define: {
+        __APP_VERSION__: JSON.stringify(pkg.version),
     },
     plugins: [
         react(),

@@ -64,7 +64,7 @@ export default function SettingsSheet({
                     Forget this host on this device
                 </button>
                 <div className="mt-2 text-center text-[11px] text-app-text-ghost">
-                    SuperHQ Remote — v0.1.0
+                    SuperHQ Remote v{__APP_VERSION__}
                 </div>
             </div>
         </Sheet>
