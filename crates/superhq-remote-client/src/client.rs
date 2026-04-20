@@ -145,7 +145,7 @@ impl RemoteClient {
         let id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
         let params_value = serde_json::to_value(&params)
             .map_err(|e| RpcCallError::Codec(format!("encode params: {e}")))?;
-        let req = Request::new(id, method, params_value);
+        let req = Request::new(id.into(), method, params_value);
         let wire =
             encode_request(&req).map_err(|e| RpcCallError::Codec(format!("encode: {e}")))?;
 
@@ -293,7 +293,7 @@ impl RemoteClient {
         let id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
         let init_params =
             serde_json::to_value(StreamInit::Pty { workspace_id, tab_id, cols, rows })?;
-        let init_req = Request::new(id, STREAM_INIT, init_params);
+        let init_req = Request::new(id.into(), STREAM_INIT, init_params);
         let wire = encode_request(&init_req)?;
         send.write_all(wire.as_bytes()).await?;
         send.write_all(b"\n").await?;
@@ -304,7 +304,7 @@ impl RemoteClient {
             .ok_or_else(|| anyhow!("stream closed before init ack"))?;
         let msg = decode(&line)?;
         match msg {
-            Message::Response(resp) if resp.id == id => {
+            Message::Response(resp) if resp.id.as_number() == Some(id) => {
                 if let Some(err) = resp.error {
                     return Err(anyhow!("stream.init rejected: {} ({})", err.message, err.code));
                 }
@@ -366,11 +366,20 @@ async fn run_control_recv_loop(
         };
         match decode(text) {
             Ok(Message::Response(resp)) => {
+                // Our `pending` map is keyed by the u64 ids we generate.
+                // Non-numeric / null ids from weird peers can't match.
+                let Some(num_id) = resp.id.as_number() else {
+                    warn!(
+                        id = %resp.id,
+                        "remote-client: response with non-numeric id; cannot match pending"
+                    );
+                    continue;
+                };
                 let mut p = pending.lock().unwrap();
-                if let Some(tx) = p.remove(&resp.id) {
+                if let Some(tx) = p.remove(&num_id) {
                     let _ = tx.send(resp);
                 } else {
-                    warn!(id = resp.id, "remote-client: response for unknown id");
+                    warn!(id = num_id, "remote-client: response for unknown id");
                 }
             }
             Ok(Message::Notification(note)) => {

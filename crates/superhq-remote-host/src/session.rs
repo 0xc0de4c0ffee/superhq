@@ -137,7 +137,7 @@ pub async fn drive_connection<H: RemoteHandler>(
                                 "remote-host: rejecting data stream over cap"
                             );
                             let err = Response::error(
-                                0,
+                                superhq_remote_proto::RequestId::Null,
                                 RpcError::new(
                                     superhq_remote_proto::error_code::INTERNAL_ERROR,
                                     format!(
@@ -236,7 +236,7 @@ async fn drive_control_stream<H: RemoteHandler>(
                         handle_incoming_notification(note);
                     }
                     Ok(Message::Response(resp)) => {
-                        warn!(id = resp.id, "remote-host: unexpected response from client");
+                        warn!(id = %resp.id, "remote-host: unexpected response from client");
                     }
                     Err(e) => {
                         // Never log attacker-controlled bodies verbatim —

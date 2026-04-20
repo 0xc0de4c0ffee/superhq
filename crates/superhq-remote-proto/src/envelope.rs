@@ -3,8 +3,44 @@ use serde::{Deserialize, Serialize};
 /// JSON-RPC 2.0 version string — a hard constant on every envelope.
 pub const JSONRPC_VERSION: &str = "2.0";
 
-/// Request-response id. `u64` because we generate them monotonically client-side.
-pub type RequestId = u64;
+/// Request-response id. JSON-RPC 2.0 allows numbers, strings, or `null`
+/// (the last is required for error responses where the server couldn't
+/// determine the id — e.g. a parse error). We generate our own ids as
+/// `u64`, but deserialize all three shapes so interop with compliant
+/// peers doesn't fail at the envelope boundary.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum RequestId {
+    Number(u64),
+    String(String),
+    Null,
+}
+
+impl RequestId {
+    /// View this id as its numeric form, if any.
+    pub fn as_number(&self) -> Option<u64> {
+        match self {
+            RequestId::Number(n) => Some(*n),
+            _ => None,
+        }
+    }
+}
+
+impl From<u64> for RequestId {
+    fn from(n: u64) -> Self {
+        RequestId::Number(n)
+    }
+}
+
+impl std::fmt::Display for RequestId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RequestId::Number(n) => write!(f, "{n}"),
+            RequestId::String(s) => write!(f, "{s}"),
+            RequestId::Null => f.write_str("null"),
+        }
+    }
+}
 
 /// Standard JSON-RPC error codes.
 pub mod error_code {
@@ -151,6 +187,10 @@ pub enum DecodeError {
     WrongVersion(String),
     #[error("malformed message: could not classify as request, response, or notification")]
     Malformed,
+    #[error("response envelope has both `result` and `error` — must be exactly one")]
+    ResponseBothResultAndError,
+    #[error("response envelope has neither `result` nor `error` — must be exactly one")]
+    ResponseNeitherResultNorError,
 }
 
 /// Parse one JSON-RPC message from a JSON string.
@@ -180,6 +220,15 @@ pub fn decode(text: &str) -> Result<Message, DecodeError> {
         }
         (true, false) => {
             let resp: Response = serde_json::from_value(raw)?;
+            // JSON-RPC 2.0 requires exactly one of `result` or `error`.
+            // The wire struct carries both as Option for serialization
+            // flexibility; enforce correctness at decode time so
+            // downstream code never has to handle impossible states.
+            match (resp.result.is_some(), resp.error.is_some()) {
+                (true, true) => return Err(DecodeError::ResponseBothResultAndError),
+                (false, false) => return Err(DecodeError::ResponseNeitherResultNorError),
+                _ => {}
+            }
             Ok(Message::Response(resp))
         }
         (false, true) => {
@@ -210,7 +259,7 @@ mod tests {
 
     #[test]
     fn roundtrip_request() {
-        let req = Request::new(42, "tabs.list", json!({}));
+        let req = Request::new(42.into(), "tabs.list", json!({}));
         let wire = encode_request(&req).unwrap();
         let decoded = decode(&wire).unwrap();
         match decoded {
@@ -221,7 +270,7 @@ mod tests {
 
     #[test]
     fn roundtrip_response_success() {
-        let resp = Response::success(42, json!([{"tab_id": 1}]));
+        let resp = Response::success(42.into(), json!([{"tab_id": 1}]));
         let wire = encode_response(&resp).unwrap();
         let decoded = decode(&wire).unwrap();
         match decoded {
@@ -232,13 +281,42 @@ mod tests {
 
     #[test]
     fn roundtrip_response_error() {
-        let resp = Response::error(42, RpcError::method_not_found("foo.bar"));
+        let resp = Response::error(42.into(), RpcError::method_not_found("foo.bar"));
         let wire = encode_response(&resp).unwrap();
         let decoded = decode(&wire).unwrap();
         match decoded {
             Message::Response(r) => assert_eq!(r, resp),
             _ => panic!("expected response"),
         }
+    }
+
+    #[test]
+    fn request_id_accepts_number_string_and_null() {
+        // Each of these is valid JSON-RPC 2.0.
+        let n: RequestId = serde_json::from_str("42").unwrap();
+        assert_eq!(n, RequestId::Number(42));
+        let s: RequestId = serde_json::from_str("\"abc\"").unwrap();
+        assert_eq!(s, RequestId::String("abc".into()));
+        let null: RequestId = serde_json::from_str("null").unwrap();
+        assert_eq!(null, RequestId::Null);
+    }
+
+    #[test]
+    fn response_rejects_both_result_and_error() {
+        let wire = r#"{"jsonrpc":"2.0","id":1,"result":{},"error":{"code":-32603,"message":"x"}}"#;
+        assert!(matches!(
+            decode(wire),
+            Err(DecodeError::ResponseBothResultAndError)
+        ));
+    }
+
+    #[test]
+    fn response_rejects_neither_result_nor_error() {
+        let wire = r#"{"jsonrpc":"2.0","id":1}"#;
+        assert!(matches!(
+            decode(wire),
+            Err(DecodeError::ResponseNeitherResultNorError)
+        ));
     }
 
     #[test]
