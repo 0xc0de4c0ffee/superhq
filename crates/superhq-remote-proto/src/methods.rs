@@ -203,10 +203,22 @@ pub const PTY_RESIZE: &str = "pty.resize";
 pub struct PtyAttachParams {
     pub workspace_id: WorkspaceId,
     pub tab_id: TabId,
+    /// The client's local xterm dimensions. The host aggregates these
+    /// across every attached client and sizes the PTY to the minimum
+    /// so multi-client sessions never thrash the PTY size.
+    /// Optional for backward compat — if omitted the host uses whatever
+    /// effective size the PTY already has.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cols: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rows: Option<u16>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PtyAttachResult {
+    /// The effective PTY dimensions after the server considered this
+    /// client's size. Clients should render at exactly this size (letterbox
+    /// any extra xterm area) so the PTY never chases a moving target.
     pub cols: u16,
     pub rows: u16,
     /// Recent scrollback delivered as a blob handle.

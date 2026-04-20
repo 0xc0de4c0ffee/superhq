@@ -3,6 +3,19 @@
 //!
 //! Lives outside GPUI entities (in a plain `Arc<RwLock<HashMap>>`) so both
 //! the GPUI render thread and async tokio tasks can access it safely.
+//!
+//! ## Dimensions aggregation
+//!
+//! The PTY has a single size. Multiple clients (local desktop + zero or
+//! more remote attaches) can be reading the same stream and each has its
+//! own xterm sized to its viewport. If each client's resize hit the PTY
+//! directly the size would thrash between them on every keystroke-driven
+//! refresh, and full-screen TUIs redraw at the wrong coordinates.
+//!
+//! The bus aggregates client-advertised sizes and resizes the PTY to the
+//! minimum across all attached clients. Every client's xterm then shows
+//! the full PTY contents; clients with bigger viewports just see empty
+//! margin. One physical resize per effective-min change.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
@@ -30,6 +43,19 @@ impl PtyInput for ShellWriter {
     }
 }
 
+/// Distinguishes clients in the per-client size map.
+///
+/// `Local` is the desktop app's `TerminalView`. `Remote(String)` is a
+/// keyed remote attach (keyed by device id so two remotes from the
+/// same device don't double-count). The keying also means a remote's
+/// repeat `pty.attach` cleanly overwrites its previous entry instead
+/// of leaking.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ClientId {
+    Local,
+    Remote(String),
+}
+
 /// Runtime handle for one tab's PTY.
 ///
 /// The `scrollback` mutex **also guards** the broadcast ordering: the
@@ -40,8 +66,17 @@ impl PtyInput for ShellWriter {
 pub struct PtyBus {
     pub writer: Arc<dyn PtyInput>,
     pub output: tokio::sync::broadcast::Sender<Bytes>,
-    pub dimensions: Arc<Mutex<(u16, u16)>>,
     pub scrollback: Arc<Mutex<crate::sandbox::pty_adapter::ScrollbackRing>>,
+    sizes: Arc<Mutex<SizeAggregator>>,
+}
+
+struct SizeAggregator {
+    /// Per-client advertised `(cols, rows)`.
+    per_client: HashMap<ClientId, (u16, u16)>,
+    /// Size we last pushed to the writer. The PTY's current effective
+    /// dimensions. Seeded at 80x24 so an unattached tab reports
+    /// something sane; real values land as soon as a client joins.
+    effective: (u16, u16),
 }
 
 impl PtyBus {
@@ -53,8 +88,11 @@ impl PtyBus {
         Self {
             writer: Arc::new(writer),
             output,
-            dimensions: Arc::new(Mutex::new((80, 24))),
             scrollback,
+            sizes: Arc::new(Mutex::new(SizeAggregator {
+                per_client: HashMap::new(),
+                effective: (80, 24),
+            })),
         }
     }
 
@@ -71,28 +109,59 @@ impl PtyBus {
             .map(|s| s.snapshot())
             .unwrap_or_default();
         let sub = self.output.subscribe();
-        // Explicit drop of the MutexGuard *after* subscribe so the reader
-        // thread can't interleave.
         drop(sb);
         (bytes, sub)
     }
 
-    /// Apply a resize. Both pushes the new size to the PTY and updates
-    /// the stored dimensions so future `pty.attach` responses reflect it.
-    pub fn resize(&self, cols: u16, rows: u16) {
-        // Writers historically take (rows, cols).
-        let _ = self.writer.resize(rows, cols);
-        if let Ok(mut g) = self.dimensions.lock() {
-            *g = (cols, rows);
+    /// Record the most recent size advertised by `client` and, if the
+    /// effective min across all attached clients changed, push a single
+    /// resize down to the PTY. Returns the effective size (useful for
+    /// `pty.attach` responses so the caller can letterbox its xterm).
+    pub fn report_client_size(
+        &self,
+        client: ClientId,
+        cols: u16,
+        rows: u16,
+    ) -> (u16, u16) {
+        self.update_with(|agg| {
+            agg.per_client.insert(client, (cols, rows));
+        })
+    }
+
+    /// Remove `client` from the aggregator. Used when a remote detaches
+    /// or its data stream closes. If no clients remain the effective
+    /// size is kept (don't downsize a live PTY to 0) so scrollback
+    /// rendering stays consistent for the next attacher.
+    pub fn release_client(&self, client: &ClientId) -> (u16, u16) {
+        self.update_with(|agg| {
+            agg.per_client.remove(client);
+        })
+    }
+
+    fn update_with<F: FnOnce(&mut SizeAggregator)>(&self, f: F) -> (u16, u16) {
+        let mut agg = match self.sizes.lock() {
+            Ok(g) => g,
+            Err(_) => return (80, 24),
+        };
+        f(&mut agg);
+        let new_effective = min_of(&agg.per_client).unwrap_or(agg.effective);
+        if new_effective != agg.effective {
+            agg.effective = new_effective;
+            let (cols, rows) = new_effective;
+            let _ = self.writer.resize(rows, cols);
         }
+        agg.effective
     }
 
     pub fn current_dimensions(&self) -> (u16, u16) {
-        self.dimensions
-            .lock()
-            .map(|g| *g)
-            .unwrap_or((80, 24))
+        self.sizes.lock().map(|g| g.effective).unwrap_or((80, 24))
     }
+}
+
+fn min_of(m: &HashMap<ClientId, (u16, u16)>) -> Option<(u16, u16)> {
+    let mut iter = m.values();
+    let first = *iter.next()?;
+    Some(iter.fold(first, |(c, r), &(cc, rr)| (c.min(cc), r.min(rr))))
 }
 
 /// Shared map keyed by (workspace_id, tab_id).

@@ -158,7 +158,12 @@ async fn pty_echo_through_stream() -> Result<()> {
     let attach_req = Request::new(
         1u64.into(),
         methods::PTY_ATTACH,
-        serde_json::to_value(methods::PtyAttachParams { workspace_id: 1, tab_id: 42 })?,
+        serde_json::to_value(methods::PtyAttachParams {
+            workspace_id: 1,
+            tab_id: 42,
+            cols: None,
+            rows: None,
+        })?,
     );
     ctrl_send.write_all(encode_request(&attach_req)?.as_bytes()).await?;
     ctrl_send.write_all(b"\n").await?;

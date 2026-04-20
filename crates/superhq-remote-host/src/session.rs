@@ -361,9 +361,18 @@ async fn dispatch_control_request<H: RemoteHandler>(
         }),
         methods::TABS_CREATE => call_method(req.params, |p| handler.tabs_create(p)).await,
         methods::TABS_CLOSE => call_method_unit(req.params, |p| handler.tabs_close(p)).await,
-        methods::PTY_ATTACH => call_method(req.params, |p| handler.pty_attach(p)).await,
-        methods::PTY_DETACH => call_method_unit(req.params, |p| handler.pty_detach(p)).await,
-        methods::PTY_RESIZE => call_method_unit(req.params, |p| handler.pty_resize(p)).await,
+        methods::PTY_ATTACH => {
+            let device = session.device_id();
+            call_method(req.params, |p| handler.pty_attach(p, device)).await
+        }
+        methods::PTY_DETACH => {
+            let device = session.device_id();
+            call_method_unit(req.params, |p| handler.pty_detach(p, device)).await
+        }
+        methods::PTY_RESIZE => {
+            let device = session.device_id();
+            call_method_unit(req.params, |p| handler.pty_resize(p, device)).await
+        }
         _ => Err(RpcError::method_not_found(&method)),
     };
 
@@ -443,8 +452,9 @@ async fn drive_data_stream<H: RemoteHandler>(
         StreamInit::Pty { workspace_id, tab_id, cols, rows } => {
             // Hand the stream off to the handler. It owns the raw I/O
             // from this point.
+            let device = session.device_id();
             handler
-                .pty_stream(workspace_id, tab_id, cols, rows, send, recv)
+                .pty_stream(workspace_id, tab_id, cols, rows, device, send, recv)
                 .await
                 .map_err(|e| anyhow!("pty_stream: {}", e.message))
         }

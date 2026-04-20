@@ -316,6 +316,7 @@ impl RemoteHandler for AppHandler {
     async fn pty_attach(
         &self,
         params: PtyAttachParams,
+        device_id: Option<String>,
     ) -> Result<PtyAttachResult, RpcError> {
         let Some(bus) = self.find_bus(params.workspace_id, params.tab_id) else {
             return Err(RpcError::new(
@@ -326,7 +327,14 @@ impl RemoteHandler for AppHandler {
                 ),
             ));
         };
-        let (cols, rows) = bus.current_dimensions();
+        // Register this remote's advertised size if it supplied one,
+        // then report back whatever effective min the bus arrived at.
+        let (cols, rows) = match (params.cols, params.rows, device_id.as_deref()) {
+            (Some(c), Some(r), Some(dev)) => {
+                bus.report_client_size(super::pty_bus::ClientId::Remote(dev.into()), c, r)
+            }
+            _ => bus.current_dimensions(),
+        };
         Ok(PtyAttachResult {
             cols,
             rows,
@@ -334,18 +342,41 @@ impl RemoteHandler for AppHandler {
         })
     }
 
-    async fn pty_detach(&self, _params: PtyDetachParams) -> Result<(), RpcError> {
+    async fn pty_detach(
+        &self,
+        params: PtyDetachParams,
+        device_id: Option<String>,
+    ) -> Result<(), RpcError> {
+        if let (Some(bus), Some(dev)) = (
+            self.find_bus(params.workspace_id, params.tab_id),
+            device_id,
+        ) {
+            bus.release_client(&super::pty_bus::ClientId::Remote(dev));
+        }
         Ok(())
     }
 
-    async fn pty_resize(&self, params: PtyResizeParams) -> Result<(), RpcError> {
+    async fn pty_resize(
+        &self,
+        params: PtyResizeParams,
+        device_id: Option<String>,
+    ) -> Result<(), RpcError> {
         let Some(bus) = self.find_bus(params.workspace_id, params.tab_id) else {
             return Err(RpcError::new(
                 error_code::NOT_FOUND,
                 "pty.resize: tab not found",
             ));
         };
-        bus.resize(params.cols, params.rows);
+        let Some(dev) = device_id else {
+            // Unauthenticated resize — no-op; real clients always have
+            // a device id by the time they're sending pty.resize.
+            return Ok(());
+        };
+        bus.report_client_size(
+            super::pty_bus::ClientId::Remote(dev),
+            params.cols,
+            params.rows,
+        );
         Ok(())
     }
 
@@ -353,8 +384,9 @@ impl RemoteHandler for AppHandler {
         &self,
         workspace_id: WorkspaceId,
         tab_id: TabId,
-        _cols: u16,
-        _rows: u16,
+        cols: u16,
+        rows: u16,
+        device_id: Option<String>,
         mut send: SendStream,
         mut recv: RecvStream,
     ) -> Result<(), RpcError> {
@@ -364,6 +396,15 @@ impl RemoteHandler for AppHandler {
                 "pty.stream: tab not found",
             ));
         };
+        // Redundant-safe: stream.init carries cols/rows too. Make sure
+        // the aggregator has an entry for this client before we start
+        // pumping bytes.
+        let client_id = device_id
+            .as_deref()
+            .map(|d| super::pty_bus::ClientId::Remote(d.into()));
+        if let Some(ref id) = client_id {
+            bus.report_client_size(id.clone(), cols, rows);
+        }
 
         let (scrollback, mut subscriber) = bus.snapshot_and_subscribe();
         let writer = bus.writer.clone();
@@ -409,6 +450,11 @@ impl RemoteHandler for AppHandler {
 
         tokio::join!(output_task, input_task);
         let _ = send_closed;
+        // Stream ended — remove this client's size contribution so
+        // the effective min reflects only currently-attached peers.
+        if let Some(id) = client_id {
+            bus.release_client(&id);
+        }
         Ok(())
     }
 

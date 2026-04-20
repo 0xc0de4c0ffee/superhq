@@ -26,7 +26,7 @@ pub use button::{
 };
 pub use handler::AppHandler;
 pub use pairing::{PairedDevice, PairingStore};
-pub use pty_bus::{new_pty_map, PtyBus, PtyMap};
+pub use pty_bus::{new_pty_map, ClientId, PtyBus, PtyMap};
 pub use snapshot::{build_agent_infos, build_snapshot, RemoteStateSnapshot};
 
 use std::sync::{Arc, RwLock};

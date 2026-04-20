@@ -96,15 +96,28 @@ pub trait RemoteHandler: Send + Sync + 'static {
     }
 
     /// Handle `pty.attach` — host prepares to accept a PTY stream for the
-    /// given (workspace_id, tab_id) tab.
-    async fn pty_attach(&self, params: PtyAttachParams) -> Result<PtyAttachResult, RpcError>;
+    /// given (workspace_id, tab_id) tab. `device_id` identifies the
+    /// calling session so the handler can aggregate per-client sizes.
+    async fn pty_attach(
+        &self,
+        params: PtyAttachParams,
+        device_id: Option<String>,
+    ) -> Result<PtyAttachResult, RpcError>;
 
     /// Handle `pty.detach` — tear down a PTY stream (or mark its tab as
     /// detached from this session).
-    async fn pty_detach(&self, params: PtyDetachParams) -> Result<(), RpcError>;
+    async fn pty_detach(
+        &self,
+        params: PtyDetachParams,
+        device_id: Option<String>,
+    ) -> Result<(), RpcError>;
 
     /// Handle `pty.resize`.
-    async fn pty_resize(&self, params: PtyResizeParams) -> Result<(), RpcError>;
+    async fn pty_resize(
+        &self,
+        params: PtyResizeParams,
+        device_id: Option<String>,
+    ) -> Result<(), RpcError>;
 
     /// Handle a newly opened PTY data stream. The handler owns the stream
     /// from this point and is responsible for pumping bytes in both
@@ -116,6 +129,7 @@ pub trait RemoteHandler: Send + Sync + 'static {
         tab_id: TabId,
         cols: u16,
         rows: u16,
+        device_id: Option<String>,
         send: SendStream,
         recv: RecvStream,
     ) -> Result<(), RpcError>;
@@ -203,7 +217,11 @@ impl RemoteHandler for StubHandler {
         Ok(Vec::new())
     }
 
-    async fn pty_attach(&self, _params: PtyAttachParams) -> Result<PtyAttachResult, RpcError> {
+    async fn pty_attach(
+        &self,
+        _params: PtyAttachParams,
+        _device_id: Option<String>,
+    ) -> Result<PtyAttachResult, RpcError> {
         // Stub: pretend any tab is attachable, 80x24.
         Ok(PtyAttachResult {
             cols: 80,
@@ -212,11 +230,19 @@ impl RemoteHandler for StubHandler {
         })
     }
 
-    async fn pty_detach(&self, _params: PtyDetachParams) -> Result<(), RpcError> {
+    async fn pty_detach(
+        &self,
+        _params: PtyDetachParams,
+        _device_id: Option<String>,
+    ) -> Result<(), RpcError> {
         Ok(())
     }
 
-    async fn pty_resize(&self, _params: PtyResizeParams) -> Result<(), RpcError> {
+    async fn pty_resize(
+        &self,
+        _params: PtyResizeParams,
+        _device_id: Option<String>,
+    ) -> Result<(), RpcError> {
         Ok(())
     }
 
@@ -226,6 +252,7 @@ impl RemoteHandler for StubHandler {
         _tab_id: TabId,
         _cols: u16,
         _rows: u16,
+        _device_id: Option<String>,
         mut send: SendStream,
         mut recv: RecvStream,
     ) -> Result<(), RpcError> {

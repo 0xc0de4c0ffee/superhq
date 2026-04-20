@@ -501,7 +501,7 @@ impl super::TerminalPanel {
 
             let terminal_config = Self::make_terminal_config();
             let resize_callback = move |cols: usize, rows: usize| {
-                bus_for_resize.resize(cols as u16, rows as u16);
+                bus_for_resize.report_client_size(crate::ui::remote::ClientId::Local, cols as u16, rows as u16);
             };
 
             cx.update(|cx| {
@@ -715,7 +715,7 @@ impl super::TerminalPanel {
 
             let terminal_config = Self::make_terminal_config();
             let resize_callback = move |cols: usize, rows: usize| {
-                bus_for_resize.resize(cols as u16, rows as u16);
+                bus_for_resize.report_client_size(crate::ui::remote::ClientId::Local, cols as u16, rows as u16);
             };
 
             cx.update(|cx| {
@@ -878,7 +878,7 @@ impl super::TerminalPanel {
         );
         let bus_for_resize = host_pty_bus.clone();
         let resize_callback = move |cols: usize, rows: usize| {
-            bus_for_resize.resize(cols as u16, rows as u16);
+            bus_for_resize.report_client_size(crate::ui::remote::ClientId::Local, cols as u16, rows as u16);
         };
         if let Ok(mut map) = self.pty_map.write() {
             map.insert((ws_id, tab_id), host_pty_bus);

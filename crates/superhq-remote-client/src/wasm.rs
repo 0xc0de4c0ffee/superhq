@@ -280,7 +280,12 @@ impl ClientHandle {
         use superhq_remote_proto::methods::PtyAttachParams;
         let attach = self
             .client
-            .pty_attach(PtyAttachParams { workspace_id, tab_id })
+            .pty_attach(PtyAttachParams {
+                workspace_id,
+                tab_id,
+                cols: None,
+                rows: None,
+            })
             .await
             .map_err(js_err)?;
 
@@ -319,26 +324,23 @@ impl ClientHandle {
         cols: u16,
         rows: u16,
     ) -> Result<PtyStreamHandle, JsValue> {
-        use superhq_remote_proto::methods::{PtyAttachParams, PtyResizeParams};
-        // Tell host we're attaching (gets dimensions + registers intent).
-        let _attach = self
+        use superhq_remote_proto::methods::PtyAttachParams;
+        // Advertise our xterm size on attach. The host aggregates per
+        // client and sizes the PTY to the minimum across all attached
+        // clients, so we may get back different effective dims.
+        let attach = self
             .client
-            .pty_attach(PtyAttachParams { workspace_id, tab_id })
-            .await
-            .map_err(js_err)?;
-        // Apply our preferred dimensions.
-        let _ = self
-            .client
-            .pty_resize(PtyResizeParams {
+            .pty_attach(PtyAttachParams {
                 workspace_id,
                 tab_id,
-                cols,
-                rows,
+                cols: Some(cols),
+                rows: Some(rows),
             })
-            .await;
+            .await
+            .map_err(js_err)?;
         let (send, recv) = self
             .client
-            .open_pty_stream(workspace_id, tab_id, cols, rows)
+            .open_pty_stream(workspace_id, tab_id, attach.cols, attach.rows)
             .await
             .map_err(|e| js_err_msg(&format!("open pty stream: {e}")))?;
         let client = self.client.clone();
