@@ -98,8 +98,20 @@ impl Database {
         }
 
         if current < 5 {
-            conn.execute_batch(include_str!("../../migrations/005_remote_control_enabled.sql"))
-                .ok(); // ignore if column already exists
+            // Only swallow "duplicate column name" (the benign idempotent
+            // case on a fresh DB re-run). Any other ALTER failure aborts
+            // the migration so we don't write version=5 against a schema
+            // that's missing the column, which would later make
+            // `get_settings` fail and the app silently fall through to
+            // whatever default the read-failure path produces.
+            if let Err(e) = conn.execute_batch(include_str!(
+                "../../migrations/005_remote_control_enabled.sql"
+            )) {
+                let msg = e.to_string();
+                if !msg.contains("duplicate column name") {
+                    return Err(e.into());
+                }
+            }
             conn.execute("INSERT OR REPLACE INTO _migrations (version) VALUES (5)", [])?;
         }
 

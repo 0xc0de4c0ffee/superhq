@@ -211,11 +211,18 @@ impl RemoteAccess {
     ) -> Result<Option<String>> {
         if let Some(server) = self.server.take() {
             let handle = self.tokio_handle.clone();
-            handle.block_on(async move {
-                if let Err(e) = server.shutdown().await {
-                    tracing::warn!(error = %e, "remote-control: shutdown error during rotate");
-                }
-            });
+            // Rotation's safety invariant: the old endpoint must be
+            // fully shut down before the new one starts and before any
+            // secrets are wiped. If shutdown fails, abort the whole
+            // operation rather than proceed while the old endpoint may
+            // still be accepting control streams.
+            let shutdown_result =
+                handle.block_on(async move { server.shutdown().await });
+            if let Err(e) = shutdown_result {
+                return Err(anyhow::anyhow!(
+                    "aborting rotate; endpoint shutdown failed: {e}"
+                ));
+            }
             tracing::info!("remote-control: server stopped for rotate");
         }
         let removed = PairingStore::new(self.db.clone()).clear_all();

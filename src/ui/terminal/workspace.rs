@@ -158,7 +158,16 @@ impl super::TerminalPanel {
     // --- Core methods ---
 
     /// Remove a workspace session and all its tabs/sandboxes.
+    ///
+    /// Purges every `(workspace_id, *)` entry from the shared `pty_map`
+    /// before dropping the session. Missing this step in a previous
+    /// version meant that a remote client who already learned a tab id
+    /// could still `pty.attach` to a ghost shell after the workspace
+    /// was torn down.
     pub fn remove_session(&mut self, workspace_id: i64, cx: &mut Context<Self>) {
+        if let Ok(mut map) = self.pty_map.write() {
+            map.retain(|(ws, _), _| *ws != workspace_id);
+        }
         self.sessions.remove(&workspace_id);
         if self.active_workspace_id == Some(workspace_id) {
             self.active_workspace_id = None;

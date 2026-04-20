@@ -367,7 +367,12 @@ impl Database {
                     sandbox_disk_mb: row.get(11)?,
                     allowed_hosts: allowed_hosts_str
                         .and_then(|s| serde_json::from_str(&s).ok()),
-                    remote_control_enabled: row.get::<_, bool>(14).unwrap_or(true),
+                    // Fail closed: if the column can't be read (partial
+                    // migration, schema drift), default to disabled.
+                    // Previously defaulted to `true`, which turned a
+                    // broken settings read into silent remote-control
+                    // enablement.
+                    remote_control_enabled: row.get::<_, bool>(14).unwrap_or(false),
                 })
             },
         )

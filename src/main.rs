@@ -189,10 +189,13 @@ impl AppView {
             std::sync::Arc::new(ui::remote::PairingStore::new(db.clone()));
         let mut remote_access =
             ui::remote::RemoteAccess::new(tokio_handle, pty_map.clone(), db.clone());
+        // Fail closed: if the settings read fails (corrupt DB, partial
+        // migration), default to remote control disabled instead of
+        // silently enabling the iroh endpoint.
         let remote_enabled = db
             .get_settings()
             .map(|s| s.remote_control_enabled)
-            .unwrap_or(true);
+            .unwrap_or(false);
         let (approver, approval_rx) = ui::remote::PairingApprover::new();
         let (commands, command_rx) = ui::remote::HostCommandDispatcher::new();
         let remote_handler = std::sync::Arc::new(ui::remote::AppHandler::new(
