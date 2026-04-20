@@ -499,7 +499,7 @@ async fn forward_http(
 }
 
 /// Extract a single claim from the `https://api.openai.com/auth` object in a JWT.
-fn extract_jwt_claim(jwt: &str, claim: &str) -> Option<String> {
+pub(crate) fn extract_jwt_claim(jwt: &str, claim: &str) -> Option<String> {
     let payload = jwt.split('.').nth(1)?;
     let bytes = URL_SAFE_NO_PAD.decode(payload).ok()?;
     let json: serde_json::Value = serde_json::from_slice(&bytes).ok()?;

@@ -30,7 +30,7 @@ const PROVIDERS: &[ProviderMeta] = &[
     ProviderMeta {
         env_var: "ANTHROPIC_API_KEY",
         label: "Anthropic",
-        agents: "Claude Code, Pi",
+        agents: "Claude Code, opencode, Pi",
         icon: Some("icons/providers/anthropic.svg"),
         oauth: false,
         note: None,
@@ -38,7 +38,7 @@ const PROVIDERS: &[ProviderMeta] = &[
     ProviderMeta {
         env_var: "OPENAI_API_KEY",
         label: "OpenAI",
-        agents: "Codex, Pi",
+        agents: "Codex, opencode, Pi",
         icon: Some("icons/providers/openai.svg"),
         oauth: true,
         note: Some("Sign in with your ChatGPT account, or paste an API key. Only one can be active at a time."),
@@ -46,7 +46,7 @@ const PROVIDERS: &[ProviderMeta] = &[
     ProviderMeta {
         env_var: "OPENROUTER_API_KEY",
         label: "OpenRouter",
-        agents: "Codex",
+        agents: "Codex, opencode",
         icon: Some("icons/providers/openrouter.svg"),
         oauth: false,
         note: None,

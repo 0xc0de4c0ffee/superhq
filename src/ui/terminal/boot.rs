@@ -23,10 +23,14 @@ impl super::TerminalPanel {
         cx: &mut Context<Self>,
     ) {
         let agent_info = self.agents.iter().find(|a| a.id == agent_id);
-        let required_secrets = agent_info
-            .map(|a| a.required_secrets.clone())
-            .unwrap_or_default();
         let agent_slug = agent_info.map(|a| a.name.clone()).unwrap_or_default();
+        let required_secrets = agents::filter_required_secrets(
+            &agent_slug,
+            &self.db,
+            agent_info
+                .map(|a| a.required_secrets.clone())
+                .unwrap_or_default(),
+        );
         let agent_for_config = agent_info.cloned();
 
         // Get install steps from static config
@@ -349,6 +353,11 @@ impl super::TerminalPanel {
                     .spawn(async move { secrets::refresh_oauth_tokens(&db, &required).await })
                     .await;
             }
+            // === SYNC AGENT-MANAGED PERSISTENT AUTH (post-refresh) ===
+            // Seeds host-mounted auth stores with freshly refreshed credentials
+            // from the superhq vault (e.g. opencode's auth.json for OpenAI
+            // OAuth). Must run after refresh and before mounts are used.
+            agents::sync_persistent_auth(&agent_slug, &db_for_secrets);
             // Skip MITM proxy setup for secrets handled by the auth gateway
             let gateway_env_vars: HashSet<&str> = gateway_spec
                 .map(|s| [s.secret_env_var].into_iter().collect())
@@ -419,7 +428,7 @@ impl super::TerminalPanel {
 
             // === BOOT TAB SANDBOX ===
             use crate::sandbox::service as svc;
-            let config = svc::build_config(
+            let mut config = svc::build_config(
                 &db_for_secrets,
                 ws_id,
                 mount_path.as_deref(),
@@ -428,6 +437,11 @@ impl super::TerminalPanel {
                 gateway_spec.as_ref(),
                 auth_gateway_handle.as_ref(),
             );
+            // Agent-specific persistent mounts (e.g. opencode's auth dir so
+            // /connect credentials survive sandbox recreation).
+            for mount in agents::extra_mounts(&agent_slug) {
+                config.mounts.push(mount);
+            }
 
             let sandbox = match tokio_handle.spawn(svc::boot_with_retry(config, 3)).await.unwrap() {
                 Ok(s) => s,
