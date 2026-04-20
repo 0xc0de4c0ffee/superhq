@@ -197,8 +197,19 @@ function IdleForm({
     onManualSubmit: () => void;
 }) {
     const canSubmit = peerId.trim().length >= 32;
-    const steps = [
-        "Open SuperHQ on your desktop.",
+    const steps: React.ReactNode[] = [
+        <>
+            Open SuperHQ on your desktop. Don&apos;t have it?{" "}
+            <a
+                href="https://superhq.ai"
+                target="_blank"
+                rel="noreferrer"
+                className="text-app-accent underline underline-offset-2"
+            >
+                Get it
+            </a>
+            .
+        </>,
         "Click the network icon next to the sidebar toggle.",
         "Scan the QR in the popover, or copy the host id.",
         "Approve the pairing request on your desktop.",
