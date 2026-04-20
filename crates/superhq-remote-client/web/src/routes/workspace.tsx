@@ -769,12 +769,29 @@ function ShellIcon({ size = 14 }: { size?: number }) {
     );
 }
 
+/// Agents we ship bundled art for. Anything not in this list falls
+/// back to the default glyph.
+const BUNDLED_AGENT_SLUGS = new Set([
+    "claude",
+    "codex",
+    "gemini",
+    "opencode",
+    "pi",
+]);
+
+/// Host-supplied `agent.icon_svg` used to be rendered via
+/// `dangerouslySetInnerHTML` — a compromised host could inject
+/// arbitrary markup into the client origin. We now render a bundled
+/// icon looked up by slug, and ignore `icon_svg` entirely.
 function AgentIcon({ agent }: { agent: AgentInfo }) {
-    if (agent.icon_svg) {
+    const slug = agent.slug ?? "";
+    if (BUNDLED_AGENT_SLUGS.has(slug)) {
         return (
-            <span
-                className="inline-flex h-full w-full items-center justify-center"
-                dangerouslySetInnerHTML={{ __html: agent.icon_svg }}
+            <img
+                src={`/icons/agents/${slug}.svg`}
+                alt=""
+                aria-hidden
+                className="h-full w-full"
             />
         );
     }

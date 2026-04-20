@@ -150,8 +150,12 @@ function createEntry(
         });
     });
 
-    // PTY boot + read loop run for the life of the entry.
+    // PTY boot + read loop run for the life of the entry. Any failure
+    // disposes the registry entry so the next mount triggers a fresh
+    // open_pty — previously the entry stayed in the registry with a
+    // dead ptyHandle, and `getOrCreateEntry` kept handing it back.
     void (async () => {
+        const key = entryKey(workspaceId, tabId);
         const { cols, rows } = term;
         try {
             entry.ptyHandle = await client.open_pty(
@@ -166,6 +170,9 @@ function createEntry(
                     err instanceof Error ? err.message : String(err)
                 }\x1b[0m`,
             );
+            // Self-heal: drop the stuck entry so a later remount can
+            // try again from scratch.
+            disposeEntry(key);
             return;
         }
         while (!entry.stopped) {
@@ -180,6 +187,12 @@ function createEntry(
                 console.warn("pty read failed:", err);
                 break;
             }
+        }
+        // Read loop exited for any reason (stream closed, read error,
+        // stopped flag). If the loop wasn't stopped by an external
+        // dispose, evict the entry so the next mount re-opens.
+        if (!entry.stopped) {
+            disposeEntry(key);
         }
     })();
 

@@ -67,23 +67,31 @@ export async function refreshSnapshot(
 }
 
 /// Start a background loop that drains host-pushed notifications and
-/// invokes `onInvalidated` whenever the host signals its snapshot
-/// has changed. Resolves when the client disconnects. Cancel by
-/// calling `close` on the returned handle.
+/// invokes `onInvalidated` whenever the host signals its snapshot has
+/// changed. `onDisconnect` fires exactly once when the control stream
+/// ends or errors — callers use it to clear the stale client and
+/// trigger a reconnect. Cancel by calling `close` on the returned
+/// handle; that suppresses `onDisconnect` (intentional teardown).
 export function watchNotifications(
     client: ClientHandle,
     onInvalidated: () => void,
+    onDisconnect?: () => void,
 ): { close: () => void } {
     let stopped = false;
     (async () => {
         while (!stopped) {
-            let payload: string | undefined;
+            let payload: string | null | undefined;
             try {
                 payload = await client.next_notification();
             } catch {
+                if (!stopped) onDisconnect?.();
                 return;
             }
-            if (!payload) return;
+            if (payload == null) {
+                // Host closed the control stream.
+                if (!stopped) onDisconnect?.();
+                return;
+            }
             try {
                 const note = JSON.parse(payload) as { method: string };
                 if (note.method === "snapshot.invalidated") {

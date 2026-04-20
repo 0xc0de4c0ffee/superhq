@@ -4,28 +4,21 @@
 // `/workspace/:id`. No inline tab list, no "Start" chip, no "+ New
 // tab" — the tab bar lives on the workspace view where it belongs.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { useNavigate } from "react-router";
 import Screen from "../components/Screen";
 import SettingsSheet from "../components/SettingsSheet";
 import { useConnectionStore } from "../state/store";
-import {
-    activateWorkspace,
-    establishSession,
-    refreshSnapshot,
-} from "../lib/session";
+import { activateWorkspace, refreshSnapshot } from "../lib/session";
 import type { WorkspaceInfo } from "../lib/types";
 
 export default function HomeRoute() {
     const navigate = useNavigate();
-    const host = useConnectionStore((s) => s.pairedHost);
     const session = useConnectionStore((s) => s.session);
     const client = useConnectionStore((s) => s.client);
     const workspaces = useConnectionStore((s) => s.workspaces);
     const tabs = useConnectionStore((s) => s.tabs);
-    const setSessionConnecting = useConnectionStore((s) => s.setSessionConnecting);
-    const setSessionReady = useConnectionStore((s) => s.setSessionReady);
-    const setSessionError = useConnectionStore((s) => s.setSessionError);
+    const clearSession = useConnectionStore((s) => s.clearSession);
     const replaceSnapshot = useConnectionStore((s) => s.replaceSnapshot);
 
     const [busyWs, setBusyWs] = useState<number | null>(null);
@@ -34,26 +27,16 @@ export default function HomeRoute() {
     const [settingsOpen, setSettingsOpen] = useState(false);
     const showToast = useConnectionStore((s) => s.showToast);
 
-    const connectNow = useCallback(async () => {
-        if (!host) return;
-        setSessionConnecting();
-        try {
-            const boot = await establishSession(host.peerId);
-            setSessionReady(boot.client, boot.workspaces, boot.tabs, boot.agents);
-        } catch (e) {
-            setSessionError(e instanceof Error ? e.message : String(e));
-        }
-    }, [host, setSessionConnecting, setSessionReady, setSessionError]);
-
-    useEffect(() => {
-        if (session.kind === "idle") {
-            void connectNow();
-        }
-    }, [session.kind, connectNow]);
+    // Bouncing the session back to idle lets PairedSessionGate re-run
+    // its connect effect. Used by the "Retry" button on error, and
+    // as the Refresh fallback when there's no live client.
+    const retryConnect = useCallback(() => {
+        clearSession();
+    }, [clearSession]);
 
     const refreshNow = useCallback(async () => {
         if (!client) {
-            await connectNow();
+            retryConnect();
             return;
         }
         if (refreshing) return;
@@ -71,7 +54,7 @@ export default function HomeRoute() {
         } finally {
             setRefreshing(false);
         }
-    }, [client, connectNow, refreshing, replaceSnapshot, showToast]);
+    }, [client, retryConnect, refreshing, replaceSnapshot, showToast]);
 
     const onOpenWorkspace = useCallback(
         async (ws: WorkspaceInfo) => {
@@ -115,7 +98,7 @@ export default function HomeRoute() {
             {session.kind === "connecting" ? (
                 <LoadingView label="Connecting to host…" />
             ) : session.kind === "error" ? (
-                <ErrorView message={session.message} onRetry={connectNow} />
+                <ErrorView message={session.message} onRetry={retryConnect} />
             ) : workspaces.length === 0 ? (
                 <EmptyView />
             ) : (
