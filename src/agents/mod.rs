@@ -1,9 +1,10 @@
 mod claude;
 mod codex;
+mod opencode;
 mod pi;
 
 use crate::db::{Database, RequiredSecret, RequiredSecretEntry};
-use shuru_sdk::AsyncSandbox;
+use shuru_sdk::{AsyncSandbox, MountConfig};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -125,6 +126,7 @@ pub fn builtin_agents() -> Vec<AgentConfig> {
         pi::config(),
         claude::config(),
         codex::config(),
+        opencode::config(),
     ]
 }
 
@@ -138,7 +140,47 @@ pub fn auth_gateway_spec_for_agent(
     match agent_name {
         "codex" => codex::auth_gateway_spec(db),
         "pi" => pi::auth_gateway_spec(db),
+        "opencode" => opencode::auth_gateway_spec(db),
         _ => fallback.and_then(|cfg| cfg.auth_gateway),
+    }
+}
+
+/// Extra host→guest mounts specific to an agent. Called by boot.rs and
+/// appended to the SandboxConfig before boot. Used for agents that need
+/// persistent state on the host filesystem beyond the workspace mount
+/// (e.g. opencode's `/connect` credential store).
+pub fn extra_mounts(agent_name: &str) -> Vec<MountConfig> {
+    match agent_name {
+        "opencode" => opencode::extra_mounts(),
+        _ => Vec::new(),
+    }
+}
+
+/// Sync superhq-managed credentials into an agent's persistent auth store
+/// on the host before the sandbox boots. Currently only opencode uses this:
+/// it seeds OpenAI OAuth tokens from the superhq vault into opencode's
+/// `auth.json` so the user doesn't have to re-auth via `/connect`.
+///
+/// Runs after OAuth refresh (so tokens are fresh) and before mount setup.
+pub fn sync_persistent_auth(agent_name: &str, db: &Database) {
+    if agent_name == "opencode" {
+        opencode::sync_auth_json(db);
+    }
+}
+
+/// Per-agent filter for required secrets, applied before building the
+/// sandbox secrets map. Used when a credential exists in the vault but
+/// can't be auto-wired for this particular agent (e.g. OpenAI OAuth
+/// tokens can't drive opencode's standard openai provider — only the
+/// Codex backend accepts them).
+pub fn filter_required_secrets(
+    agent_name: &str,
+    db: &Database,
+    required: Vec<RequiredSecretEntry>,
+) -> Vec<RequiredSecretEntry> {
+    match agent_name {
+        "opencode" => opencode::filter_required_secrets(db, required),
+        _ => required,
     }
 }
 
@@ -158,6 +200,7 @@ pub async fn run_auth_setup(
         "claude" => claude::auth_setup(sandbox, vars).await,
         "codex" => codex::auth_setup(sandbox, vars).await,
         "pi" => pi::auth_setup(sandbox, vars).await,
+        "opencode" => opencode::auth_setup(sandbox, vars).await,
         _ => {}
     }
 }
